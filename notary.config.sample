@@ -12,3 +12,9 @@ dbname = perspectives
 # private - full path to private signing key for responses
 [keys]
 private = /full/path/to/notary.priv
+
+#Scanning options
+# use_sni - whether Server Name Indication should be used, leave enabled unless
+# your openssl is older than 0.9.8j
+[scanning]
+use_sni = true
