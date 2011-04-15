@@ -1,0 +1,10 @@
+#temporary files
+*.pyc
+.*.swp
+*.log
+
+#we don't want keys or specific config in repo
+*.priv
+*.pub
+notary.config
+
