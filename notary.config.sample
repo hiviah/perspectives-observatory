@@ -1,20 +1,26 @@
 #PostgreSQL configuration data
 # host, port, user, password - data needed to create the connection
 # dbname - database name used (in case it would clash with your existing DB)
+# min_connections, max_connections - every thread in scanner uses own
+#   connection, set to appropriate values
 [database]
 host = localhost
 port = 5432
 user = postgres
 password = db_password
 dbname = perspectives
+min_connections = 1
+max_connections = 20
 
 #Configuration of signing keys
 # private - full path to private signing key for responses
 [keys]
 private = /full/path/to/notary.priv
 
-#Scanning options
-# use_sni - whether Server Name Indication should be used, leave enabled unless
-# your openssl is older than 0.9.8j
-[scanning]
+#Server options
+# use_sni - whether Server Name Indication should be used when scanning, leave
+#   enabled unless your openssl is older than 0.9.8j
+# send_multi_hashes - send other hashes in response than just md5 (experimental)
+[server]
 use_sni = true
+send_multi_hashes = false
