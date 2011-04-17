@@ -31,8 +31,8 @@ class NotaryServerConfig(object):
 		self.db_user = parser.get("database", "user")
 		self.db_password = parser.get("database", "password")
 		self.db_name = parser.get("database", "dbname")
-		self.db_min_conn = parser.get("database", "min_connections")
-		self.db_max_conn = parser.get("database", "max_connections")
+		self.db_min_conn = parser.getint("database", "min_connections")
+		self.db_max_conn = parser.getint("database", "max_connections")
 
 		self.keyfile = parser.get("keys", "private")
 
