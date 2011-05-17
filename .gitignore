@@ -3,6 +3,9 @@
 .*.swp
 *.log
 
+#Komodo project
+Perspectives.kpf
+
 #we don't want keys or specific config in repo
 *.priv
 *.pub
