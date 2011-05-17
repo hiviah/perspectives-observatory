@@ -36,6 +36,7 @@ class NotaryHTTPServer:
 
 	def get_xml(self, service_id): 
 		print "Request for '%s'" % service_id
+		service = notary_common.ObservedServer(service_id)
 		sys.stdout.flush()
 		conn = sqlite3.connect(self.db_file)
 		cur = conn.cursor()

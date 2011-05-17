@@ -16,6 +16,9 @@
 
 from ConfigParser import SafeConfigParser
 
+
+Config = None #singleton NotaryServerConfig instance
+
 class NotaryServerConfig(object):
 	"""Configuration parser for notary server"""
 
@@ -39,5 +42,11 @@ class NotaryServerConfig(object):
 		self.use_sni = parser.get("server", "use_sni")
 		self.multi_hashes = parser.get("server", "send_multi_hashes")
 
+def config_initialize(filename):
+	"""Initializes Config singleton object using the specifiled filename
+	@paramfilename: config filename"""
+	
+	global Config
+	Config = NotaryServerConfig(filename)
 
 

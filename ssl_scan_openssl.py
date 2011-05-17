@@ -14,61 +14,60 @@
 #   You should have received a copy of the GNU General Public License
 #   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from subprocess import *
-import re
+import subprocess
 import sys
+import traceback
 import notary_common 
 
-# By default, we do not probe using TLS 'Server Name Indication' (SNI) 
-# as it was only compiled into openssl by default since 0.9.8j .  
-# If you have a version of openssl with SNI support, change the value of
-# this variable, as your notary probing will be more accurate.
-USE_SNI = False 
-
+import config
+import db
 
 # note: timeout is ignored for now
 def attempt_observation_for_service(service_id, timeout):  
-	dns_and_port = service_id.split(",")[0]
-	dns = dns_and_port.split(":")[0] 
+	"""Attempt observation of SSL service.
+	@param service_id: instance of notary_common.ObservedServer
+	@param timeout: not supported, openssl has some hardwired timeout
+	@returns: instance of notary_common.Observation
+	"""
+	cmd1_args = ["openssl","s_client","-connect", service_id.host_port ] 
+	if (config.Config.use_sni): 
+		cmd1_args += [ "-servername", service_id.host ]  
 
-	cmd1_args = ["openssl","s_client","-connect", dns_and_port ] 
-	if (USE_SNI): 
-		cmd1_args += [ "-servername", dns ]  
-	p1 = Popen(cmd1_args, stdin=file("/dev/null", "r"), stdout=PIPE, stderr=None)
-	p2 = Popen(["openssl","x509","-fingerprint","-md5", "-noout"],
-		stdin=p1.stdout, stdout=PIPE, stderr=None)
+	p1 = subprocess.Popen(cmd1_args, stdin=file("/dev/null", "r"), stdout=subprocess.PIPE,
+		stderr=file("/dev/null", "w"))
+	p2 = subprocess.Popen(["openssl","x509","-outform","der"],
+		stdin=p1.stdout, stdout=subprocess.PIPE, stderr=file("/dev/null", "w"))
+
+	#output is DER-encoded cert
 	output = p2.communicate()[0].strip()
 	p1.wait()
 	p2.wait()
 
 	if p2.returncode != 0:
-		raise Exception("ERROR: Could not fetch/decode certificate for '%s'" % dns_and_port) 
+		raise Exception("ERROR: Could not fetch/decode certificate for '%s'" % service_id.host_port) 
 
-	fp_regex = re.compile("^MD5 Fingerprint=[A-F0-9]{2}(:([A-F0-9]){2}){15}$")
-	if not fp_regex.match(output):
-		raise Exception("ERROR: invalid fingerprint '%s'" % output)
-
-	return output.split("=")[1].lower()
+	return notary_common.Observation(output)
 
 
 if __name__ == "__main__":
 
 
-	if len(sys.argv) != 3 and len(sys.argv) != 2:
-		print >> sys.stderr, "ERROR: usage: <service-id> [notary-db-file>]"
+	if len(sys.argv) < 3:
+		print >> sys.stderr, "ERROR: usage: <service-id> config_file"
 		exit(1)
 
-	service_id = sys.argv[1]
-	try: 
-		fp = attempt_observation_for_service(service_id, 10) 
-	
-		if len(sys.argv) == 3: 
-			notary_common.report_observation(sys.argv[2], service_id, fp) 
-		else: 
-			print "INFO: no database specified, not saving observation"
+	service_id = notary_common.ObservedServer(sys.argv[1])
 
-		print "Successful scan complete: '%s' has key '%s' " % (service_id,fp)
-	except:
-		print "Error scanning for %s" % service_id 
-		traceback.print_exc(file=sys.stdout)
+	config.config_initialize(sys.argv[2])
+	db.db_initialize(config.Config)
+
+	fp = attempt_observation_for_service(service_id, 10) 
+
+	print "Successful scan complete: '%s' has key '%s' " % (service_id,fp)
+	
+	if len(sys.argv) == 3: 
+		notary_common.report_observation(service_id, fp) 
+	else: 
+		print "INFO: no database specified, not saving observation"
+
 		

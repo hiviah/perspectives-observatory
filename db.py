@@ -17,7 +17,7 @@ Db.commit()
 from psycopg2.extras import DictCursor
 from psycopg2.pool import PersistentConnectionPool
 
-Db = None #singleton database connection pool, see initialize()
+Db = None #singleton database connection pool, see db_initialize()
 
 class DbPool(object):
 	"""DB class that makes connection transparently. Thread-safe - every
@@ -71,7 +71,7 @@ class DbPool(object):
 		"""Rollback last transaction on this thread's connection"""
 		self.connection().rollback()
 
-def initialize(config):
+def db_initialize(config):
 	"""Initialize database connection pool. Once done, the db.Db can
 	be used to access connections from various threads.
 	@param config: instance of NotaryServerConfig

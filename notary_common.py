@@ -19,57 +19,68 @@ import os
 import sys
 import subprocess
 import re
+import hashlib
+import binascii
 
-from db import Db
+import db
 
 SSL_SCAN="ssl_scan_openssl.py" 
 SSH_SCAN="ssh_scan_openssh.py"
 
 class ObservedServer(object):
-        """Represents scanned server - fqdn, port, service"""
+	"""Represents scanned server - host, port, service"""
 
-        #syntax for "fqdn:port,service"
-        _syntax_re = re.compile("([^,:]+):(\d+),(\d+)")
+	#syntax for "host:port,service"
+	_syntax_re = re.compile("([^,:]+):(\d+),(\d+)")
 
-        def __init__(self, service_id):
-		"""Parse service_id string of form "fqdn:port,service"
+	def __init__(self, service_id):
+		"""Parse service_id string of form "host:port,service"
 		@raises ValueError if service_id is badly formed"""
 
 		m = self._syntax_re.match(service_id)
 		if m is None:
 		    raise ValueError("Service_id string '%s' is malformed" % service_id)
 		
-		self.fqdn = m.group(1)
+		self.host = m.group(1)
 		self.port = int(m.group(2))
 		self.service_type = int(m.group(3))
 
 	def __str__(self):
-		"""Returns the old form of "fqdn:port,service" """
-		return "%s:%s,%s" % (self.fqdn, self.port, self.service_type)
+		"""Returns the old form of "host:port,service" """
+		return "%s:%s,%s" % (self.host, self.port, self.service_type)
 
 	def __repr__(self):
 		"""repr() form for debugging"""
 		return "<ObservedServer '%s'>" % str(self)
 
+	@property
+	def host_port(self):
+		"""Return connect string in 'host:port' format"""
+		return "%s:%s" % (self.host, self.port)
+
 class Observation(object):
 	"""Class for storing observed fingeprints from various hash algorithms.
-
+	
 	Accessing the hashes is done by using one of the attributes named in
 	_supported_hashes, e.g. if obs is Observation instance, obs.sha1 will
 	return its sha1 hash, if any was set, otherwise it's None."""
 
 	_supported_hashes = ('md5', 'sha1', 'sha256', 'sha512')
 
-	def __init__(self, **kwargs):
-		"""Initialize with optionally setting hash in constructor,
-		use the kwarg names in _supported_hashes, e.g.:
+	def __init__(self, cert):
+		"""Initialize with certificate, computes the hashes in _supported_hashes
+		which are then stored as attributes as binary strings.
 		
-		o = Observation(md5=..., sha1=...)
-
-		Values are expected to be in binary form (i.e. not hex-strings).
+		@param cert: certificate as string in DER encoding (validity is not checked)
 		"""
+		self.cert = cert
 		for hash_algo in self._supported_hashes:
-		    setattr(self, hash_algo, kwargs.get(hash_algo))
+			hash = hashlib.new(hash_algo)
+			hash.update(cert)
+			setattr(self, hash_algo, hash.digest())
+	
+	def __str__(self):
+		return ",".join(["(%s: %s)" % (h, binascii.hexlify(getattr(self, h))) for h in self._supported_hashes ])
 
 # The start_scan_probe seems to be deprecated, only simple_scanner.py uses it
 # and it is not mentioned in README at all.
@@ -83,7 +94,7 @@ def start_scan_probe(sid, notary_db):
 	else: 
 		print >> sys.stderr, "ERROR: invalid service_type for '%s'" % sid
 		return
-      
+
 	#TODO: why do we need subprocess for this? why not call the method in this process?
 	nul_f = open(os.devnull,'w') 
 	return subprocess.Popen(["python", first_arg, str(sid), notary_db], stdout=nul_f , stderr=subprocess.STDOUT )
@@ -94,20 +105,20 @@ def report_observation(service_id, observation):
 	@param observation: Observation instance"""
 
 	cur_time = int(time.time()) 
-	cur = Db.cursor()
+	cur = db.Db.cursor()
 
 	#Select last fingerprint and check if it's the same.
 	#If same, update end timestamp, otherwise insert new observation
-        sql = """SELECT id, md5, end_ts from observations_view WHERE
-		    	WHERE fqdn = %s 
+	sql = """SELECT id, md5, end_ts from observations_view
+			WHERE host = %s 
 				AND port = %s
 				AND service_type = %s
 			ORDER BY end_ts DESC
 			LIMIT 1
 		    """
-	sql_data = (service_id.fqdn, service_id.port, service_id.service_type)
+	sql_data = (service_id.host, service_id.port, service_id.service_type)
 
-        cur.execute(sql, sql_data)
+	cur.execute(sql, sql_data)
 
 	most_recent_md5 = None
 	most_recent_id = None
@@ -116,7 +127,7 @@ def report_observation(service_id, observation):
 	#checking for "freshness" is done by MD5 checking since we won't necessarily
 	#have other hashes (like it was in original code)
 	if row is not None:
-		most_recent_md5 = row['md5']
+		most_recent_md5 = str(row['md5'])
 		most_recent_id = row['id']
 
 	if most_recent_md5 == observation.md5: 
@@ -126,17 +137,18 @@ def report_observation(service_id, observation):
 		sql = """UPDATE observations 
 				SET end_time = to_timestamp(%s)
 				WHERE id = %s
-			""", 
+			"""
 		sql_data = (cur_time, most_recent_id)
 		cur.execute(sql, sql_data)
 	else: 
 		# key has changed or no observations exist yet for this service_id.  Either way
 		# add a new entry for this key with timespan start and end set to the current time
-		sql = """INSERT INTO observations (fqdn, port, service_type, start_time, end_time, md5, sha1) 
-				VALUES (%s, %s, %s, to_timestamp(%s), to_timestamp(%s), %s, %s)
+		sql = """INSERT INTO observations (host, port, service_type, start_time, end_time, md5, sha1, certificate) 
+				VALUES (%s, %s, %s, to_timestamp(%s), to_timestamp(%s), %s, %s, %s)
 			"""
-		sql_arg = (service_id.fqdn, service_id.port, service_id.service_type,
-			cur_time, cur_time, observation.md5, observation.sha1)
+		sql_arg = (service_id.host, service_id.port, service_id.service_type,
+			cur_time, cur_time, buffer(observation.md5), buffer(observation.sha1),
+			buffer(observation.cert))
 		
 		cur.execute(sql, sql_arg)
 		
@@ -150,6 +162,6 @@ def report_observation(service_id, observation):
 			sql_arg = (cur_time-1, most_recent_id)
 			cur.execute(sql, sql_arg)
 
-	Db.commit()
+	db.Db.commit()
 
 

@@ -15,20 +15,21 @@ INSERT INTO service (id, name) VALUES
 
 CREATE TABLE observations (
     id serial PRIMARY KEY,
-    fqdn VARCHAR(255) NOT NULL,
+    host VARCHAR(255) NOT NULL,
     port integer NOT NULL,
     service_type SMALLINT REFERENCES service(id),
     start_time timestamp with time zone NOT NULL,
     end_time timestamp with time zone NOT NULL,
+    certificate bytea, -- allowed null to allowd old DB migration
     md5 bytea NOT NULL,
     sha1 bytea -- allowed null to allow old DB migration
 );
 
--- (fqdn, port, service_type) is not unique since fingerprints may change
-CREATE INDEX service_idx ON observations (fqdn, port, service_type);
+-- (host, port, service_type) is not unique since fingerprints may change
+CREATE INDEX service_idx ON observations (host, port, service_type);
 
 CREATE VIEW observations_view AS
-    SELECT id, fqdn, port, service_type,
+    SELECT id, host, port, service_type,
         date_part('epoch', start_time)::int AS start_ts,
         date_part('epoch', end_time)::int AS end_ts,
         md5,
