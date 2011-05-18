@@ -77,27 +77,27 @@ class NotaryHTTPServer:
 			key_elem.setAttribute("type","ssl")
 			key_elem.setAttribute("fp", k)
 			top_element.appendChild(key_elem)
-	        	num_timespans = len(timestamps_by_key[k])
-	        	head = struct.pack("BBBBB", (num_timespans >> 8) & 255, num_timespans & 255, 0, 16,3)
-	        	fp_bytes = ""
+			num_timespans = len(timestamps_by_key[k])
+			head = struct.pack("BBBBB", (num_timespans >> 8) & 255, num_timespans & 255, 0, 16,3)
+			fp_bytes = ""
 			for hex_byte in k.split(":"):
-	                	fp_bytes += struct.pack("B", int(hex_byte,16))
+				fp_bytes += struct.pack("B", int(hex_byte,16))
 			ts_bytes = ""
-	        	for ts in sorted(timestamps_by_key[k], key=lambda t_pair: t_pair[0]):
-	                	ts_start = ts[0]
-	                	ts_end  = ts[1]
+			for ts in sorted(timestamps_by_key[k], key=lambda t_pair: t_pair[0]):
+				ts_start = ts[0]
+				ts_end	= ts[1]
 				ts_elem = new_doc.createElement("timestamp")
 				ts_elem.setAttribute("end",str(ts_end))
 				ts_elem.setAttribute("start", str(ts_start))
 				key_elem.appendChild(ts_elem) 
-	                	ts_bytes += struct.pack("BBBB", ts_start >> 24 & 255,
-	                                                   ts_start >> 16 & 255,
-	                                                   ts_start >> 8 & 255,
-	                                                   ts_start & 255)
-	                	ts_bytes += struct.pack("BBBB", ts_end >> 24 & 255,
-	                                                   ts_end >> 16 & 255,
-	                                                   ts_end >> 8 & 255,
-	                                                   ts_end & 255)
+				ts_bytes += struct.pack("BBBB", ts_start >> 24 & 255,
+							ts_start >> 16 & 255,
+							ts_start >> 8 & 255,
+							ts_start & 255)
+				ts_bytes += struct.pack("BBBB", ts_end >> 24 & 255,
+							ts_end >> 16 & 255,
+							ts_end >> 8 & 255,
+							ts_end & 255)
 			packed_data =(head + fp_bytes + ts_bytes) + packed_data   
 	
 		packed_data = service_id.encode() + struct.pack("B", 0) + packed_data 
@@ -116,9 +116,9 @@ class NotaryHTTPServer:
 		if (host == None or port == None or service_type == None): 
 			raise cherrypy.HTTPError(400)
 		cherrypy.response.headers['Content-Type'] = 'text/xml'
-      		return self.get_xml(str(host + ":" + port + "," + service_type))
+		return self.get_xml(str(host + ":" + port + "," + service_type))
  
-    	index.exposed = True
+	index.exposed = True
 
 
 class OnDemandScanThread(threading.Thread): 
