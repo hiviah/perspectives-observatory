@@ -197,10 +197,12 @@ def get_standard_client_hello():
 	
 
 def get_twobyte_hexstr(intval): 
-	return "%0.2X" % (intval & 0xff00) + "%0.2X" % (intval & 0xff)
+	"""Return packed value of intval as hex string of two bytes, network order."""
+	return binascii.b2a_hex(struct.pack("!H", intval))
 
 def get_threebyte_hexstr(intval): 
-	return "%0.2X" % (intval & 0xff0000) + "%0.2X" % (intval & 0xff00) + "%0.2X" % (intval & 0xff) 
+	"""Return packed value of intval as hex string of three bytes, network order."""
+	return binascii.b2a_hex(struct.pack("!I", intval)[1:])
 
 def get_hostname_extension(hostname): 
 	
