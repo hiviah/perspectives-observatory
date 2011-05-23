@@ -33,7 +33,7 @@ CREATE VIEW observations_view AS
         date_part('epoch', start_time)::int AS start_ts,
         date_part('epoch', end_time)::int AS end_ts,
         md5,
-        encode(md5, 'hex') AS md5hex, 
+        encode(md5, 'hex') AS md5_hex, 
         sha1,
-        encode(sha1, 'hex') AS sha1hex
+        encode(sha1, 'hex') AS sha1_hex
         FROM observations;

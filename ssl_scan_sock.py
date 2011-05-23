@@ -25,11 +25,12 @@ import sys
 import errno 
 import notary_common
 
+import config
+import db
+
 # This is a lightweight version of SSL scanning that does not invoke openssl
 # at all.  Instead, it executes the initial steps of the SSL handshake directly
 # using a TCP socket and parses the data itself
-
-USE_SNI = False # Use server name indication: See section 3.1 of http://www.ietf.org/rfc/rfc4366.txt
 
 SLEEP_LEN_SEC = 0.2
 
@@ -117,33 +118,46 @@ def get_all_handshake_protocols(rec_data):
 
 # rfc 2246 says the server cert if the first one
 # in the chain, so ignore everything else 
-def get_server_cert_from_protocol(proto_data): 
+def get_server_cert_from_protocol(proto_data):
+	"""Extract site certificate and return observed certificate.
+	@param proto_data: server response (handshake from server hello)
+	@return: notary_common.Observation object with cert and fingerprints
+	"""
 	proto_data = proto_data[3:] # get rid of 3-bytes describing length of all certs
 	(b1,b2,b3) = struct.unpack("!BBB",proto_data[0:3])
 	cert_len = (b1 << 16) | (b2 << 8) | b3
 	cert = proto_data[3: 3 + cert_len]
-	m = hashlib.md5() 
-	m.update(cert)
-	fp = ""
-	digest_raw = m.digest()
-	for i in range(len(digest_raw)):
-		fp += binascii.b2a_hex(digest_raw[i]) + ":"
-	return fp[:-1] 
+	
+	return notary_common.Observation(cert)
 
-def attempt_observation_for_service(service_id, timeout_sec): 
-
-		dns, port = service_id.split(",")[0].split(":")
+def attempt_observation_for_service(service_id, timeout_sec):
+		"""Run observation for service
+		@param service_id: requested service as notary_common.ObservedServer
+		@param timeout_sec: scanning timeout
+		@return: notary_common.Observation with cert and fingerprints of service
+		@raise SSLScanTimeoutException: on timeout
+		"""
+		host, port = service_id.host, service_id.port
 		# if we want to try SNI, do such a scan but if that
 		# scan fails with an SSL alert, retry with a non SNI request
-		if USE_SNI and dns[-1:].isalpha(): 
+		if config.Config.use_sni and host[-1:].isalpha(): 
 			try: 
-				return run_scan(dns,port,timeout_sec,True)
+				return run_scan(host, port, timeout_sec, True)
 			except SSLAlertException: 
 				pass
 
-		return run_scan(dns,port,timeout_sec,False) 
+		return run_scan(host, port, timeout_sec, False) 
 		
-def run_scan(dns, port, timeout_sec, sni_query): 
+def run_scan(dns, port, timeout_sec, sni_query):
+	"""Run SSL/TLS scan on given host.
+	@param dns: hostname
+	@param port: port
+	@param timeout_sec: timeout in seconds
+	@param sni_query: True iff Server Name Indication extension should be used,
+		use only if hostname is specified via FQDN and not just IP
+	@return: observation as instance of notary_common.Observation
+	@raise SSLScanTimeoutException: on timeout
+	"""
 	try: 	
 		if sni_query:
 			# only do SNI query for DNS names, per RFC
@@ -192,7 +206,8 @@ def run_scan(dns, port, timeout_sec, sni_query):
 			pass
 		raise e
 
-def get_standard_client_hello(): 
+def get_standard_client_hello():
+	"""SSLv2 encoded client hello"""
 	return "8077010301004e0000002000003900003800003500001600001300000a0700c000003300003200002f0300800000050000040100800000150000120000090600400000140000110000080000060400800000030200800000ff9c82ce1e4bc89df2c726b7cebe211ef80a611945d140834eede5674b597be487" 
 	
 
@@ -204,14 +219,16 @@ def get_threebyte_hexstr(intval):
 	"""Return packed value of intval as hex string of three bytes, network order."""
 	return binascii.b2a_hex(struct.pack("!I", intval)[1:])
 
-def get_hostname_extension(hostname): 
+def get_hostname_extension(hostname):
+	"""SNI extension for TLSv1 client hello"""
 	
 	hex_hostname = binascii.b2a_hex(hostname)
 	hn_len = len(hostname) 
 	return "0000" + get_twobyte_hexstr(hn_len + 5) +  get_twobyte_hexstr(hn_len + 3) + \
 				"00" + get_twobyte_hexstr(hn_len) + hex_hostname
 
-def get_sni_client_hello(hostname): 
+def get_sni_client_hello(hostname):
+	"""TLSv1 client hello with SNI extension"""
 	hn_extension = get_hostname_extension(hostname)
 	all_extensions = hn_extension 
 	the_rest = "03014d786109055e4736b93b63c371507f824c2d0f05a25b2d54b6b52a1e43c2a52c00002800390038003500160013000a00330032002f000500040015001200090014001100080006000300ff020100" + get_twobyte_hexstr(len(all_extensions)/2) + all_extensions 
@@ -222,21 +239,21 @@ def get_sni_client_hello(hostname):
 if __name__ == "__main__":
 
 
-	if len(sys.argv) != 3 and len(sys.argv) != 2:
-		print >> sys.stderr, "ERROR: usage: <service-id> [notary-db-file>]"
+	if len(sys.argv) != 3:
+		print >> sys.stderr, "ERROR: usage: <service-id> <config_file>"
 		exit(1)
 
-	service_id = sys.argv[1]
+	config.config_initialize(sys.argv[2])
+	db.db_initialize(config.Config)
+	
+	service_id = notary_common.ObservedServer(sys.argv[1])
 	try:
- 
+
 		fp = attempt_observation_for_service(service_id, 10) 
 	
-		if len(sys.argv) == 3: 
-			notary_common.report_observation(sys.argv[2], service_id, fp) 
-		else: 
-			print "INFO: no database specified, not saving observation"
-
 		print "Successful scan complete: '%s' has key '%s' " % (service_id,fp)
+		notary_common.report_observation(service_id, fp) 
+
 	except:
 		print "Error scanning for %s" % service_id 
 		traceback.print_exc(file=sys.stdout)

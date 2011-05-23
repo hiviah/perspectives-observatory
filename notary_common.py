@@ -65,7 +65,7 @@ class Observation(object):
 	_supported_hashes, e.g. if obs is Observation instance, obs.sha1 will
 	return its sha1 hash, if any was set, otherwise it's None."""
 
-	_supported_hashes = ('md5', 'sha1', 'sha256', 'sha512')
+	_supported_hashes = ('md5', 'sha1')
 
 	def __init__(self, cert):
 		"""Initialize with certificate, computes the hashes in _supported_hashes
