@@ -20,7 +20,5 @@ private = /full/path/to/notary.priv
 #Server options
 # use_sni - whether Server Name Indication should be used when scanning, leave
 #   enabled unless your openssl is older than 0.9.8j
-# send_multi_hashes - send other hashes in response than just md5 (experimental)
 [server]
 use_sni = true
-send_multi_hashes = false

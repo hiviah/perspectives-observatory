@@ -39,8 +39,7 @@ class NotaryServerConfig(object):
 
 		self.keyfile = parser.get("keys", "private")
 
-		self.use_sni = parser.get("server", "use_sni")
-		self.multi_hashes = parser.get("server", "send_multi_hashes")
+		self.use_sni = parser.getboolean("server", "use_sni")
 
 def config_initialize(filename):
 	"""Initializes Config singleton object using the specifiled filename
