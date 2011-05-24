@@ -10,34 +10,45 @@ Primary Author: Dan Wendlandt (danwent@gmail.com)
  ==== PREREQUISITES ====
 
 The implementation relies on python >= 2.5 and the following third-party python libraries:
-* sqlite3
+* postgresql
+* psycopg2 (postgresql python binding)
 * M2Crypto
 * cherrypy3 
 
 On debian you can install these using: 
 
-apt-get install python-sqlite python-m2crypto python-cherrypy3
+apt-get install postgresql postgresql-client python-psycopg2 python-m2crypto python-cherrypy3
 
  ===== SETUP ====
 
-First, create a database: 
+Here we assume the database runs on localhost.
 
-% python utilities/create_tables.py notary.sqlite
+Set password for 'postgres' user (unless you already had it set up):
+
+% passwd postgres
+
+Run the script to create database 'perspectives':
+
+% createdb -U postgres -W perspectives -h localhost
+% psql -U postgres -h localhost perspectives < sql/00_create.sql
 
 Then create the notary server key pair (private key is needed by the server, and 
 the public key should be used by the notary client): 
 
 % bash utilities/create_key_pair.sh notary.priv notary.pub
+
+Copy the 'notary.config.sample' file to 'notary.config' and set your password
+and the path to private file.
  
  ===== RUNNING ====
 
 Run the webserver in its own window (or in the background): 
 
-% python notary_http.py notary.sqlite notary.priv 
+% python notary_http.py notary.config
 
 To run a scan:  
 
-% python ssl_scan_sock.py www.google.com:443,2 notary.sqlite
+% python ssl_scan_sock.py www.google.com:443,2 notary.config
 
 To test, run a query for a service-id you have scanned:
 
@@ -50,7 +61,7 @@ Commonly, you do not run scans explicitly using these tools, but rather set a cr
 periodically run a scan of all service-ids in the database, then pass this list 
 to threaded_scanner.py: 
 
-% python utilities/list_service_ids.py notary.sqlite all | python threaded_scanner.py notary.sqlite - 10 10
+% python list_service_ids.py notary.config all | python threaded_scanner.py notary.config - 10 10
 
 Running a scan can take a long time, depending on the size of your database and the rate you
 specify to threaded_scanner.py .  
@@ -59,7 +70,7 @@ Here is an example crontab file to run scans twice a day (1 am and 1 pm) on all 
 that have been seen in the past 5 days, with a rate of 20 simultaneous probes and a timeout of 20 seconds
 per probe.  It also contains an entry to restart the server if the machine reboots: 
 
-0 1,13 * * * cd /root/Perspectives-Server && python utilities/list_service_ids.py notary.sqlite all | python threaded_scanner.py notary.sqlite - 10 10
+0 1,13 * * * cd /root/Perspectives-Server && python list_service_ids.py notary.config all | python threaded_scanner.py notary.config - 10 10
 
 @reboot cd /root/Perspectives-Server && python notary_http.py notary.sqlite notary.priv
 
@@ -84,5 +95,4 @@ This code still needs some clean-up and less hard-coded configuration, but its g
 for use.  Please visit the github page to submit changes and suggest improvments: 
 
 https://github.com/danwent/Perspectives-Server
-
 
