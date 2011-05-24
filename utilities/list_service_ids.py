@@ -18,7 +18,9 @@ import sys
 import os
 import re
 import time
-import sqlite3 
+
+import config
+import db
 
 # This script generates a file of services ids
 # indicating when the last time the notary successfully observed
@@ -33,7 +35,7 @@ import sqlite3
 # considered 'live' and of all services considered 'dead'.
 
 def usage_and_exit(): 
-  print >> sys.stderr, "ERROR: usage: <notary-db-file> <all|older|newer> <days>"
+  print >> sys.stderr, "ERROR: usage: <notary.config> <all|older|newer> <days>"
   exit(1)
 
 if len(sys.argv) == 4: 
@@ -48,15 +50,29 @@ else:
 	usage_and_exit()
 	
 
-conn = sqlite3.connect(sys.argv[1])
-cur = conn.cursor()
+config.config_initialize(sys.argv[1])
+db.db_initialize(config.Config)
+cur = db.Db.cursor()
+
 
 if sys.argv[2] == "all": 
-	cur.execute("select distinct service_id from observations")
+	sql = "SELECT DISTINCT host, port, service_type FROM observations_view"
+	cur.execute(sql)
 elif sys.argv[2] == "older": 
-	cur.execute("select distinct service_id from observations where service_id not in (select distinct service_id from observations where end > ?)", [ threshold_sec ])
+	sql = """SELECT DISTINCT host, port, service_type FROM observations o
+			WHERE NOT EXISTS
+				(SELECT 1 FROM observations_view v WHERE
+					o.host = v.host and
+					o.port = v.port and
+					o.service_type = v.service_type and
+					end_ts > %s)
+		"""
+	cur.execute(sql, (threshold_sec,))
 else: 
-	cur.execute("select distinct service_id from observations where end > ?", [ threshold_sec ] )
+	sql = """SELECT DISTINCT host, port, service_type FROM observations_view
+			WHERE end_ts > %s
+		"""
+	cur.execute(sql, [ threshold_sec ] )
 	
-for row in cur:
-	print row[0] 
+for row in cur.fetchall():
+	print "%s:%s,%s" % (row['host'] , row['port'], row['service_type'])

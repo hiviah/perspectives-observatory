@@ -24,14 +24,15 @@ import binascii
 
 import db
 
-SSL_SCAN="ssl_scan_openssl.py" 
-SSH_SCAN="ssh_scan_openssh.py"
-
 class ObservedServer(object):
 	"""Represents scanned server - host, port, service"""
 
 	#syntax for "host:port,service"
 	_syntax_re = re.compile("([^,:]+):(\d+),(\d+)")
+	
+	#SSH, SSL - service_type "enum"
+	SSH = 1
+	SSL = 2
 
 	def __init__(self, service_id):
 		"""Parse service_id string of form "host:port,service"
@@ -52,6 +53,22 @@ class ObservedServer(object):
 	def __repr__(self):
 		"""repr() form for debugging"""
 		return "<ObservedServer '%s'>" % str(self)
+	
+	def _id(self):
+		"""Returns tuple to be used for __hash__, __eq__, etc."""
+		return (self.host, self.port, self.service_type)
+		
+	def __hash__(self):
+		return hash(self._id())
+	
+	def __eq__(self, other):
+		return self._id() == other._id()
+	
+	def __ne__(self, other):
+		return not self.__eq__(other)
+	
+	def __cmp__(self, other):
+		return cmp(self._id(), other._id())
 
 	@property
 	def host_port(self):
@@ -66,6 +83,8 @@ class Observation(object):
 	return its sha1 hash, if any was set, otherwise it's None."""
 
 	_supported_hashes = ('md5', 'sha1')
+	
+	__hash__ = None
 
 	def __init__(self, cert):
 		"""Initialize with certificate, computes the hashes in _supported_hashes
@@ -81,23 +100,6 @@ class Observation(object):
 	
 	def __str__(self):
 		return ",".join(["(%s: %s)" % (h, binascii.hexlify(getattr(self, h))) for h in self._supported_hashes ])
-
-# The start_scan_probe seems to be deprecated, only simple_scanner.py uses it
-# and it is not mentioned in README at all.
-def start_scan_probe(sid, notary_db): 
-	"""Start probe for given service, store resulting fingerprint in database
-	@param sid: instance of ObservedServer"""
-	if sid.service_type == "2": 
-		first_arg = SSL_SCAN 
-	elif sid.service_type == "1": 
-		first_arg = SSH_SCAN 
-	else: 
-		print >> sys.stderr, "ERROR: invalid service_type for '%s'" % sid
-		return
-
-	#TODO: why do we need subprocess for this? why not call the method in this process?
-	nul_f = open(os.devnull,'w') 
-	return subprocess.Popen(["python", first_arg, str(sid), notary_db], stdout=nul_f , stderr=subprocess.STDOUT )
 
 def report_observation(service_id, observation): 
 	"""Insert or update observation and commit to DB

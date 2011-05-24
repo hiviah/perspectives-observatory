@@ -152,7 +152,7 @@ class NotaryHTTPServer(object):
 		
 		@param host: hostname
 		@param port: port where service runs
-		@param service_type: 1 (ssh) or 2 (ssl)
+		@param service_type: 1 (ssh) or 2 (ssl), see notary_common.ObservedServer
 		@param version: response version, current version is 1 (with md5 hash only),
 			future versions will provide more hashes
 		"""

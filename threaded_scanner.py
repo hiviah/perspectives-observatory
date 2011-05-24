@@ -22,9 +22,11 @@ import sys
 import notary_common 
 import traceback 
 import threading
-import sqlite3
 import errno
 from ssl_scan_sock import attempt_observation_for_service, SSLScanTimeoutException, SSLAlertException
+
+import config
+import db
 
 # TODO: more fine-grained error accounting to distinguish different failures
 # (dns lookups, conn refused, timeouts).  Particularly interesting would be
@@ -76,6 +78,7 @@ class ScanThread(threading.Thread):
 	def run(self): 
 		try: 
 			fp = attempt_observation_for_service(self.sid, self.timeout_sec)
+			print "Got: %s, %s" % (self.sid, fp)
 			res_list.append((self.sid,fp))
 		except Exception, e:
 			self.record_failure(e) 
@@ -104,10 +107,12 @@ class GlobalStats():
 		self.failure_other = 0 
 	
 if len(sys.argv) != 5: 
-  print >> sys.stderr, "ERROR: usage: <notary-db> <service_id_file> <scans-per-sec> <timeout sec> " 
+  print >> sys.stderr, "ERROR: usage: <notary.config> <service_id_file> <scans-per-sec> <timeout sec> " 
   sys.exit(1)
 
-notary_db=sys.argv[1]
+config.config_initialize(sys.argv[1])
+db.db_initialize(config.Config)
+
 if sys.argv[2] == "-": 
 	f = sys.stdin
 else: 
@@ -123,26 +128,25 @@ print "Starting scan at: %s" % localtime
 print "INFO: *** Timeout = %s sec  Scans-per-second = %s" % \
     (timeout_sec, rate) 
 
-# read all sids to start, otherwise sqlite locks up 
-# if you start scanning before list_services_ids.py is not done
+# reading all sids was necessary with sqlite when piped with utilities/list_service_ids.py
+# to prevent sqlite lockup, but is no longer necessary
 all_sids = [ line.rstrip() for line in f ]
 
-for sid in all_sids:  
-	try: 
-		# ignore non SSL services	
-		if sid.split(",")[1] == "2": 
+for sid_str in all_sids:  
+	try:
+		sid = notary_common.ObservedServer(sid_str)
+		# ignore non SSL services
+		if sid.service_type == sid.SSL: 
 			stats.num_started += 1
 			t = ScanThread(sid,stats,timeout_sec)
 			t.start()
- 
+
 		if (stats.num_started % rate) == 0: 
 			time.sleep(1)
 			try: 
-				conn = sqlite3.connect(notary_db)
-				for r in res_list: 
-					notary_common.report_observation_with_conn(conn, r[0], r[1]) 
-				conn.commit()
-				conn.close() 
+				for r in res_list:
+					print "reporting %s, %s" % (r[0], r[1])
+					notary_common.report_observation(r[0], r[1]) 
 			except:
 				# TODO: we should probably retry here 
 				print "DB Error: Failed to write res_list of length %s" % len(res_list)
