@@ -1,17 +1,16 @@
 """Usage:
-from config import NotaryServerConfig
+import config
 import db
-from db import Db
 
-config = NotaryServerConfig(filename)
-db.initialize(config)
+config.config_initialize(filename)
+db.db_initialize(config.Config)
 
-#Db is a pool that is used like a singleton
-cursor = Db.cursor()
+#Db is a connection pool that is used like a singleton; one connection per thread
+cursor = db.Db.cursor()
 cursor.execute(...)
 #do stuff
 cursor.close()
-Db.commit()
+db.Db.commit()
 """
 
 from psycopg2.extras import DictCursor
