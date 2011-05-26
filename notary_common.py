@@ -111,13 +111,13 @@ def report_observation(service_id, observation):
 
 	#Select last fingerprint and check if it's the same.
 	#If same, update end timestamp, otherwise insert new observation
-	sql = """SELECT id, md5, end_ts from observations_view
+	sql = """SELECT id, md5, sha1, end_ts from observations_view
 			WHERE host = %s 
 				AND port = %s
 				AND service_type = %s
 			ORDER BY end_ts DESC
 			LIMIT 1
-		    """
+			"""
 	sql_data = (service_id.host, service_id.port, service_id.service_type)
 
 	cur.execute(sql, sql_data)
@@ -126,21 +126,26 @@ def report_observation(service_id, observation):
 	most_recent_id = None
 	row = cur.fetchone()
 	
-	#checking for "freshness" is done by MD5 checking since we won't necessarily
-	#have other hashes (like it was in original code)
 	if row is not None:
 		most_recent_md5 = str(row['md5'])
+		most_recent_sha1 = row['sha1'] is not None and str(row['sha1']) or None
 		most_recent_id = row['id']
 
-	if most_recent_md5 == observation.md5: 
+	#hashes other than md5 may not be present in older DB records, so compare
+	#them only if present
+	if most_recent_md5 == observation.md5 \
+		and (most_recent_sha1 is None or most_recent_sha1 == observation.sha1):
 		# this key was also the most recently seen key before this observation.
 		# just update the observation row to set the timespan 'end' value to the 
 		# current time.
+		# SHA1 is updated because it may not have been present if the record
+		# is old.
 		sql = """UPDATE observations 
-				SET end_time = to_timestamp(%s)
+				SET end_time = to_timestamp(%s),
+					sha1 = %s
 				WHERE id = %s
 			"""
-		sql_data = (cur_time, most_recent_id)
+		sql_data = (cur_time, buffer(observation.sha1), most_recent_id)
 		cur.execute(sql, sql_data)
 	else: 
 		# key has changed or no observations exist yet for this service_id.  Either way
