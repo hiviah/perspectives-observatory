@@ -52,10 +52,11 @@ class NotaryHTTPServer(object):
 	@staticmethod
 	def _unpack_hex_with_colons(b):
 		"""Unpacks binary string to hex representation with bytes delimited
-		by colon, e.g. "11:22:33:44:de:ad:be:ef".
+		by colon in lowercase, e.g. "11:22:33:44:de:ad:be:ef".
 		"""
 		fmt = ":".join(["%02X"]*len(b))
-		return fmt % struct.unpack("%dB"%len(b), b)
+		colonized_hexstr = fmt % struct.unpack("%dB"%len(b), b)
+		return colonized_hexstr.lower()
 
 	def get_xml(self, service_id, version=1):
 		"""Return xml with certificates' fingerprints.
