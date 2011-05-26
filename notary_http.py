@@ -57,16 +57,17 @@ class NotaryHTTPServer(object):
 		fmt = ":".join(["%02X"]*len(b))
 		return fmt % struct.unpack("%dB"%len(b), b)
 
-	def get_xml(self, service_id):
-		"""Return "old-style" xml with md5 certificates' fingerprints.
+	def get_xml(self, service_id, version=1):
+		"""Return xml with certificates' fingerprints.
 		@param service_id: requested service
 		@type service_id: notary_common.ObservedServer
+		@param version: 1 (for old md5-only) or 2 (multiple hashes, currently md5 and sha1)
 		"""
 		print "Request for '%s'" % service_id
 		sys.stdout.flush()
 		
 		cur = db.Db.cursor()
-		sql = """SELECT md5, start_ts, end_ts FROM observations_view
+		sql = """SELECT md5, sha1, start_ts, end_ts FROM observations_view
 			WHERE host = %s AND
 				port = %s AND
 				service_type = %s
@@ -79,9 +80,11 @@ class NotaryHTTPServer(object):
 		timestamps_by_key = {}
 		keys = set()
 
-		#key "k" is md5 hash of certificate
 		for row in rows:
-			k = row['md5']
+			md5_fp = str(row['md5']) #DB query returns MD5 and SHA1 as binary buffer()
+			#hashes other than md5 might not be present in older DB records
+			sha1_fp = row['sha1'] is not None and str(row['sha1']) or None
+			k = (md5_fp, sha1_fp)
 			if k not in keys: 
 				timestamps_by_key[k] = []
 				keys.add(k) 
@@ -101,21 +104,43 @@ class NotaryHTTPServer(object):
 		dom_impl = getDOMImplementation() 
 		new_doc = dom_impl.createDocument(None, "notary_reply", None) 
 		top_element = new_doc.documentElement
-		top_element.setAttribute("version","1") 
+		top_element.setAttribute("version", str(version)) 
 		top_element.setAttribute("sig_type", "rsa-md5") 
 	
+		## Packed data format:
+		#service-id (variable length, terminated with null-byte) 
+		#num_timespans (2-bytes)
+		#key_len_bytes (2-bytes, 16 for version 1 - md5 only; version 2 has
+		#	the length as sum of all various hashes, e.g. 16+20=36 for md5 and sha1
+		#key type (1-byte), always has a value of 3 for SSL 
+		#key data (length specified in key_len_bytes; fingerprints themselves are
+		#	ordered alphabetically, i.e. bytes of md5, then bytes of sha1 hash)
+		#list of timespan start,end pairs  (length is 2 * 4 * num_timespans)
 		packed_data = ""
 	
 		for k in keys:
+			(md5_fp, sha1_fp) = k
 			key_elem = new_doc.createElement("key")
 			key_elem.setAttribute("type","ssl")
-			key_elem.setAttribute("fp", self._unpack_hex_with_colons(k))
+			
+			#binary fingerprints are packed in alphabetical order (md5, sha1, ...)
+			fp_len = len(md5_fp)
+			fp_bytes = md5_fp
+			
+			if version == 1:
+				key_elem.setAttribute("fp", self._unpack_hex_with_colons(md5_fp))
+			else:
+				key_elem.setAttribute("md5", self._unpack_hex_with_colons(md5_fp))
+				if sha1_fp is not None: #can be NULL in DB for compatibility reasons
+					fp_len += len(sha1_fp)
+					fp_bytes += sha1_fp
+					key_elem.setAttribute("sha1", self._unpack_hex_with_colons(sha1_fp))
+			
 			top_element.appendChild(key_elem)
 			num_timespans = len(timestamps_by_key[k])
-			#in the next struct.pack: 16 is length of md5 hash, 3 is "ssl"
-			#service type, inferred from FF extension
-			head = struct.pack("BBBBB", (num_timespans >> 8) & 255, num_timespans & 255, 0, 16,3)
-			fp_bytes = str(k) #k is binary buffer()
+			
+			TYPE_SSL = 3 #from FF extension's comments
+			head = struct.pack("!2HB", num_timespans, fp_len, TYPE_SSL)
 			ts_bytes = ""
 			for ts in sorted(timestamps_by_key[k], key=lambda t_pair: t_pair[0]):
 				ts_start = ts[0]
@@ -124,14 +149,8 @@ class NotaryHTTPServer(object):
 				ts_elem.setAttribute("end",str(ts_end))
 				ts_elem.setAttribute("start", str(ts_start))
 				key_elem.appendChild(ts_elem) 
-				ts_bytes += struct.pack("BBBB", ts_start >> 24 & 255,
-							ts_start >> 16 & 255,
-							ts_start >> 8 & 255,
-							ts_start & 255)
-				ts_bytes += struct.pack("BBBB", ts_end >> 24 & 255,
-							ts_end >> 16 & 255,
-							ts_end >> 8 & 255,
-							ts_end & 255)
+				ts_bytes += struct.pack("!I", ts_start)
+				ts_bytes += struct.pack("!I", ts_end)
 			packed_data =(head + fp_bytes + ts_bytes) + packed_data   
 	
 		packed_data = str(service_id) + struct.pack("B", 0) + packed_data 
@@ -156,13 +175,12 @@ class NotaryHTTPServer(object):
 		@param version: response version, current version is 1 (with md5 hash only),
 			future versions will provide more hashes
 		"""
-		if (host == None or port == None or service_type == None): 
+		if (host == None or port == None or service_type == None or version not in ("1", "2")): 
 			raise cherrypy.HTTPError(400)
 		cherrypy.response.headers['Content-Type'] = 'text/xml'
 		observed = notary_common.ObservedServer(str(host + ":" + port + "," + service_type))
 		
-		#currently returns only version 1
-		return self.get_xml(observed)
+		return self.get_xml(observed, int(version))
 
 	index.exposed = True
 
