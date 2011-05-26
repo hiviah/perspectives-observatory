@@ -78,16 +78,17 @@ class NotaryHTTPServer(object):
 		db.Db.commit()
 		
 		timestamps_by_key = {}
-		keys = set()
+		keys = []
 
 		for row in rows:
 			md5_fp = str(row['md5']) #DB query returns MD5 and SHA1 as binary buffer()
 			#hashes other than md5 might not be present in older DB records
 			sha1_fp = row['sha1'] is not None and str(row['sha1']) or None
+			
 			k = (md5_fp, sha1_fp)
-			if k not in keys: 
+			if k not in timestamps_by_key:
 				timestamps_by_key[k] = []
-				keys.add(k) 
+				keys.append(k)
 			timestamps_by_key[k].append((row['start_ts'],row['end_ts']))
 		
 		if len(rows) == 0: 
