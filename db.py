@@ -11,10 +11,16 @@ cursor.execute(...)
 #do stuff
 cursor.close()
 db.Db.commit()
+
+IMPORTANT: when connection is used in a thread, you need to return it via
+db.Db.putconn() upon finishing thread, otherwise the pool won't know it can be
+reused. Note that cherrypy itself is threaded with 10 threads default.
 """
 
+import threading
+
 from psycopg2.extras import DictCursor
-from psycopg2.pool import PersistentConnectionPool
+from psycopg2.pool import ThreadedConnectionPool
 
 Db = None #singleton database connection pool, see db_initialize()
 
@@ -36,7 +42,7 @@ class DbPool(object):
 		self.min_connections = config.db_min_conn
 		self.max_connections = config.db_max_conn
 
-		self.pool = PersistentConnectionPool(
+		self.pool = ThreadedConnectionPool(
 			minconn = self.min_connections,
 			maxconn = self.max_connections,
 			host = self.host,
@@ -60,7 +66,7 @@ class DbPool(object):
 	
 	def connection(self):
 		"""Return connection for this thread"""
-		return self.pool.getconn()
+		return self.pool.getconn(id(threading.current_thread()))
 
 	def commit(self):
 		"""Commit all the commands in this transaction in this thread's connection"""
@@ -69,6 +75,17 @@ class DbPool(object):
 	def rollback(self):
 		"""Rollback last transaction on this thread's connection"""
 		self.connection().rollback()
+	
+	def	putconn(self):
+		"""Put back connection used by this thread. Necessary upon finishing of
+		spawned threads, otherwise new threads won't get connection if the pool
+		is depleted."""
+		conn = self.connection()
+		self.pool.putconn(conn, id(threading.current_thread()))
+	
+	def close(self):
+		"""Close connection."""
+		self.connection().close()
 
 def db_initialize(config):
 	"""Initialize database connection pool. Once done, the db.Db can

@@ -202,6 +202,10 @@ class OnDemandScanThread(threading.Thread):
 			notary_common.report_observation(self.sid, fp)
 		except Exception, e:
 			traceback.print_exc(file=sys.stdout)
+		finally:
+			#return connection back to pool, otherwise it won't know it's
+			#not used anymore
+			db.Db.putconn()
 
 		self.server_obj.dec_active_threads()
 

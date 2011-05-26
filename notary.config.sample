@@ -9,6 +9,8 @@ port = 5432
 user = postgres
 password = db_password
 dbname = perspectives
+#note that cherrypy uses up to 10 threads by default and there can be up to 10
+#instances of OnDemandScanThread in notary_http.py
 min_connections = 1
 max_connections = 20
 
