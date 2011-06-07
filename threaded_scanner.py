@@ -120,8 +120,8 @@ if sys.argv[2] == "-":
 else: 
 	f = open(sys.argv[2])
 
-res_list = []
 result_queue = Queue.Queue()
+
 
 stats = GlobalStats()
 thread_count = int(sys.argv[3])
@@ -155,6 +155,14 @@ try:
 except KeyboardInterrupt: 
 	exit(1)	
 
+while not result_queue.empty():
+	(sid, fp) = result_queue.get_nowait()
+	try:
+		notary_common.report_observation(sid, fp)
+	except:
+		print "DB error: Failed storing observation for %s" % sid
+		traceback.print_exc(file=sys.stdout)
+		
 duration = int(time.time() - start_time)
 localtime = time.asctime( time.localtime(start_time) )
 print "Ending scan at: %s" % localtime
