@@ -42,7 +42,7 @@ class ObservedServer(object):
 		if m is None:
 		    raise ValueError("Service_id string '%s' is malformed" % service_id)
 		
-		self.host = m.group(1)
+		self.host = (m.group(1)).lower() #force lowercase of hostname
 		self.port = int(m.group(2))
 		self.service_type = int(m.group(3))
 
