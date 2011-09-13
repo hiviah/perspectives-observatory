@@ -34,6 +34,8 @@ import db
 # those that fail or hang after making some progress, as they could indicate
 # logic bugs
 
+#TODO sharing global_stats in threads has potential race condition; it also breaks
+#when hosts in input are not unique due to self.global_stats.threads[sid]
 
 class ScanThread(threading.Thread): 
 
@@ -52,7 +54,8 @@ class ScanThread(threading.Thread):
 		except: 
 			return 0 # no error
 
-	def record_failure(self, e, sid): 
+	def record_failure(self, e, sid):
+		print "Failed to get sid %s: %s" % (sid, e)
 		stats.failures += 1
 		if type(e) == type(self.timeout_exc): 
 			stats.failure_timeouts += 1
@@ -78,7 +81,7 @@ class ScanThread(threading.Thread):
 	def run(self):
 		while True:
 			sid = self.que.get()
-			self.global_stats.threads[sid] = time.time()
+			#self.global_stats.threads[sid] = time.time()
 			
 			try: 
 				fp = attempt_observation_for_service(sid, self.timeout_sec)
@@ -88,7 +91,7 @@ class ScanThread(threading.Thread):
 				
 			self.que.task_done()
 	
-			del self.global_stats.threads[sid]
+			#del self.global_stats.threads[sid]
 
 class GlobalStats(): 
 
