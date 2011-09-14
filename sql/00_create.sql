@@ -39,10 +39,3 @@ CREATE VIEW observations_view AS
         encode(sha1, 'hex') AS sha1_hex
         FROM observations;
 
-CREATE VIEW observations_dump_view AS
-    SELECT id, host, port, 
-        date_part('epoch', start_time)::int AS start_ts,
-        date_part('epoch', end_time)::int AS end_ts,
-        certificate
-        FROM observations;
-
