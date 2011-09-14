@@ -1,4 +1,5 @@
 DROP VIEW IF EXISTS observations_view;
+DROP VIEW IF EXISTS observations_dump_view;
 DROP TABLE IF EXISTS observations;
 DROP TABLE IF EXISTS service;
 
@@ -17,12 +18,12 @@ CREATE TABLE observations (
     id serial PRIMARY KEY,
     host VARCHAR(255) NOT NULL,
     port integer NOT NULL,
-    service_type SMALLINT REFERENCES service(id),
+    service_type SMALLINT NOT NULL REFERENCES service(id),
     start_time timestamp with time zone NOT NULL,
     end_time timestamp with time zone NOT NULL,
-    certificate bytea, -- allowed null to allowd old DB migration
+    certificate bytea NOT NULL,
     md5 bytea NOT NULL,
-    sha1 bytea -- allowed null to allow old DB migration
+    sha1 bytea NOT NULL
 );
 
 -- (host, port, service_type) is not unique since fingerprints may change
@@ -37,3 +38,11 @@ CREATE VIEW observations_view AS
         sha1,
         encode(sha1, 'hex') AS sha1_hex
         FROM observations;
+
+CREATE VIEW observations_dump_view AS
+    SELECT id, host, port, 
+        date_part('epoch', start_time)::int AS start_ts,
+        date_part('epoch', end_time)::int AS end_ts,
+        certificate
+        FROM observations;
+
