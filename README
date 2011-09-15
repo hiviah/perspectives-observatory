@@ -1,44 +1,85 @@
 
  ==== INFO ====
 
-This is a simple python-only implementation of a Perspectives network notary server. 
+This is a fork of Perspectives notary server originally written by Dan Wendlandt
+(http://www.cs.cmu.edu/~perspectives).
 
-Contact: perspectives-project@cs.cmu.edu  
-Website: http://www.cs.cmu.edu/~perspectives 
-Primary Author: Dan Wendlandt (danwent@gmail.com) 
+Differences from the original Perspectives server:
+
+- stores whole certificates (DER encoded) instead of just md5 sum
+- uses PostgreSQL instead of sqlite, so it's suitable for storing millions of records 
+  (can function as SSL Observatory to make "global state snapshots" of SSLiverse subsets)
+- hard-coded defaults extracted from source and put into config file
+- other code cleanup (logging, threaded scanner rewrite, etc.)
+
+Author: Ondrej Mikle, ondrej.mikle @ {gmail.com, nic.cz}
 
  ==== PREREQUISITES ====
 
-The implementation relies on python >= 2.5 and the following third-party python libraries:
-* postgresql
-* psycopg2 (postgresql python binding)
+The implementation relies on python >= 2.5 and the following packages:
+* PostgreSQL
+* psycopg2
 * M2Crypto
 * cherrypy3 
 
-On debian you can install these using: 
+On Debian you can install these using: 
 
 apt-get install postgresql postgresql-client python-psycopg2 python-m2crypto python-cherrypy3
 
+On RHEL/CentOS/Scientific Linux install these packages (cherrypy can be found
+in rpmforge repository):
+
+yum install postgresql postgresql-server m2crypto python-psycopg2 python-cherrypy
+
  ===== SETUP ====
 
-Here we assume the database runs on localhost.
+1. Quick database setup
 
-Set password for 'postgres' user (unless you already had it set up):
+Here we assume the database runs on localhost (it should run either on localhost
+or LAN, psycopg does not support reconnects). Note that this setup may vary
+depending on PostgreSQL version and Linux distribution. The DB setup is a bit
+tedious, though.
 
-% passwd postgres
+Start the server:
 
-Run the script to create database 'perspectives':
+# chkconfig postgresql on; service postgresql start     ### for RHEL/CentOS/SL
+# /etc/init.d/postgresql start                          ### for Debian/other
 
-% createdb -U postgres -W perspectives -h localhost
-% psql -U postgres -h localhost perspectives < sql/00_create.sql
+Create user to run the server, we'll use 'perspectives' user, set the user's
+password:
+
+# useradd -m perspectives
+# passwd perspectives
+
+As 'postgres' user, run psql prompt:
+
+# su -c 'psql -d template1 -U postgres' - postgres
+
+In psql prompt, set the user's DB privileges:
+
+template1=# CREATE DATABASE perspectives;
+template1=# CREATE USER perspectives WITH PASSWORD 'SomePassword';
+template1=# GRANT ALL PRIVILEGES ON DATABASE perspectives TO perspectives;
+template1=# \q
+
+Change to user 'perspectives' and create DB schema:
+
+# su - perspectives
+% cd /the/directory/with/Perspectives_source_code
+% psql -U perspectives -h localhost perspectives < sql/00_create.sql
+
+
+2. Create keypair
 
 Then create the notary server key pair (private key is needed by the server, and 
 the public key should be used by the notary client): 
 
 % bash utilities/create_key_pair.sh notary.priv notary.pub
 
-Copy the 'notary.config.sample' file to 'notary.config' and set your password
-and the path to private file.
+3. Edit config
+
+Copy the 'notary.config.sample' file to 'notary.config', set your DB user/password,
+paths to private key file and logs.
  
  ===== RUNNING ====
 
@@ -66,13 +107,13 @@ to threaded_scanner.py:
 Running a scan can take a long time, depending on the size of your database and the rate you
 specify to threaded_scanner.py .  
 
-Here is an example crontab file to run scans twice a day (1 am and 1 pm) on all services in the database
-that have been seen in the past 5 days, with a rate of 20 simultaneous probes and a timeout of 20 seconds
-per probe.  It also contains an entry to restart the server if the machine reboots: 
+Here is an example crontab file to run scans twice a day (1 am and 1 pm) on all
+services in the database in 50 threads with 15 second timeout per probe.  It
+also contains an entry to restart the server if the machine reboots: 
 
-0 1,13 * * * cd /root/Perspectives-Server && python list_service_ids.py notary.config all | python threaded_scanner.py notary.config - 10 10
+0 1,13 * * * cd /home/perspectives/Perspectives-Server && python list_service_ids.py notary.config all | python threaded_scanner.py notary.config - 50 15
 
-@reboot cd /root/Perspectives-Server && python notary_http.py notary.sqlite notary.priv
+@reboot cd /home/perspectives/Perspectives-Server && python notary_http.py notary.config
 
  ==== Notes ====
 
@@ -83,7 +124,7 @@ The Perspectives Firefox client will requery appropriately.
 
 Unlike the original C implementation of the notary server, this implementation performs
 signatures in the webserver portion of the code.  This makes scanning lighter weight, at the 
-cost of making reuests heavy-weight and subject to DoS.  We could implement a caching scheme
+cost of making requests heavy-weight and subject to DoS.  We could implement a caching scheme
 for the signatures if it proves valuable.  
 
 The only service-type that is currently fully supported is SSL (service-type 2).  There is 
@@ -92,7 +133,7 @@ this type, we do not regularly test it.  Currently, the threaded_scanner.py will
 for SSL services, though work to have it scan for SSH services is pretty minor.  
 
 This code still needs some clean-up and less hard-coded configuration, but its good enough 
-for use.  Please visit the github page to submit changes and suggest improvments: 
+for use.  Please visit the github page to submit changes and suggest improvements: 
 
-https://github.com/danwent/Perspectives-Server
+https://github.com/hiviah/Perspectives-Server-Postgresql
 
