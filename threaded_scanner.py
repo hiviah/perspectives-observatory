@@ -16,14 +16,12 @@
 
 import sys
 import time 
-import socket
-import struct
-import sys
 import notary_common 
 import traceback 
 import threading
 import errno
 import Queue
+import logging
 
 from ssl_scan_sock import attempt_observation_for_service, SSLScanTimeoutException, SSLAlertException
 import config
@@ -37,7 +35,8 @@ import db
 #TODO sharing global_stats in threads has potential race condition; it also breaks
 #when hosts in input are not unique due to self.global_stats.threads[sid]
 
-class ScanThread(threading.Thread): 
+class ScanThread(threading.Thread):
+	"""Worker thread scanning service taken from synchronized queue."""
 
 	def __init__(self, que, global_stats,timeout_sec): 
 		self.que = que
@@ -55,7 +54,7 @@ class ScanThread(threading.Thread):
 			return 0 # no error
 
 	def record_failure(self, e, sid):
-		print "Failed to get sid %s: %s" % (sid, e)
+		logger.debug("Failed to get sid %s: %s" % (sid, e))
 		stats.failures += 1
 		if type(e) == type(self.timeout_exc): 
 			stats.failure_timeouts += 1
@@ -75,13 +74,10 @@ class ScanThread(threading.Thread):
 			stats.failure_dns += 1
 		else: 	
 			stats.failure_other += 1 
-			print "Unknown error scanning '%s'" % sid 
-			traceback.print_exc(file=sys.stdout)
 
 	def run(self):
 		while True:
 			sid = self.que.get()
-			#self.global_stats.threads[sid] = time.time()
 			
 			try: 
 				fp = attempt_observation_for_service(sid, self.timeout_sec)
@@ -90,9 +86,26 @@ class ScanThread(threading.Thread):
 				self.record_failure(e, sid)
 				
 			self.que.task_done()
-	
-			#del self.global_stats.threads[sid]
 
+class StorageThread(threading.Thread):
+	"""Thread storing scanned observations into database."""
+	
+	def __init__(self, result_queue):
+		self.result_queue = result_queue
+		threading.Thread.__init__(self)
+	
+	def run(self):
+		while True:
+			scan_result = self.result_queue.get()
+			try:
+				(sid, fp) = scan_result
+				notary_common.report_observation(sid, fp)
+				logger.debug("Storing sid %s" % sid)
+			except Exception, e:
+				logger.exception("Failed to store result %s")
+			
+			self.result_queue.task_done()
+		
 class GlobalStats(): 
 
 	def __init__(self): 
@@ -112,11 +125,21 @@ class GlobalStats():
 		self.failure_other = 0 
 	
 if len(sys.argv) != 5: 
-  print >> sys.stderr, "ERROR: usage: <notary.config> <service_id_file> <thread_count> <timeout sec> " 
-  sys.exit(1)
+	print >> sys.stderr, "ERROR: usage: <notary.config> <service_id_file> <thread_count> <timeout sec> " 
+	sys.exit(1)
 
 config.config_initialize(sys.argv[1])
 db.db_initialize(config.Config)
+
+# create custom logger - psycopg2 interferes with top-level "logging" module logger
+logger = logging.getLogger('threaded_scanner')
+logger.setLevel(logging.DEBUG)
+ch = logging.StreamHandler()
+ch.setLevel(logging.DEBUG)
+formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s [%(pathname)s:%(lineno)d]")
+ch.setFormatter(formatter)
+logger.addHandler(ch)
+
 
 if sys.argv[2] == "-": 
 	f = sys.stdin
@@ -131,9 +154,8 @@ thread_count = int(sys.argv[3])
 timeout_sec = int(sys.argv[4]) 
 start_time = time.time()
 localtime = time.asctime( time.localtime(start_time) )
-print "Starting scan at: %s" % localtime
-print "INFO: *** Timeout = %s sec  Thread count = %s" % \
-    (timeout_sec, thread_count) 
+logger.info("Starting scan at: %s" % localtime)
+logger.info("Timeout = %s sec  Thread count = %s" % (timeout_sec, thread_count) )
 
 # reading all sids was necessary with sqlite when piped with utilities/list_service_ids.py
 # to prevent sqlite lockup, but is no longer necessary
@@ -146,29 +168,32 @@ for i in range(thread_count):
 	t.setDaemon(True)
 	t.start()
 
-for sid_str in all_sids:  
-	sid = notary_common.ObservedServer(sid_str)
+storage_thread = StorageThread(result_queue)
+storage_thread.setDaemon(True)
+storage_thread.start()
+
+for sid_str in all_sids:
+	try:
+		sid = notary_common.ObservedServer(sid_str)
+	except ValueError:
+		logger.debug("Skipping sid %s: malformed")
 	# ignore non SSL services
 	if sid.service_type == sid.SSL:
 		que.put(sid)
 		
 try:
+	logger.debug("Wating for scans to finish")
 	que.join()
+	logger.debug("Scans finished")
+	result_queue.join()
+	logger.debug("Scans stored")
 
 except KeyboardInterrupt: 
 	exit(1)	
 
-while not result_queue.empty():
-	(sid, fp) = result_queue.get_nowait()
-	try:
-		notary_common.report_observation(sid, fp)
-	except:
-		print "DB error: Failed storing observation for %s" % sid
-		traceback.print_exc(file=sys.stdout)
-		
 duration = int(time.time() - start_time)
 localtime = time.asctime( time.localtime(start_time) )
-print "Ending scan at: %s" % localtime
-print "Scan of %s services took %s seconds.  %s Failures" % (len(all_sids),duration, stats.failures)
+logger.info("Ending scan at: %s" % localtime)
+logger.info("Scan of %s services took %s seconds.  %s Failures" % (len(all_sids),duration, stats.failures))
 exit(0) 
 
