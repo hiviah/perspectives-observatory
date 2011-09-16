@@ -134,6 +134,7 @@ db.db_initialize(config.Config)
 # create custom logger - psycopg2 interferes with top-level "logging" module logger
 logger = logging.getLogger('threaded_scanner')
 logger.setLevel(logging.DEBUG)
+logger.propagate = False
 ch = logging.StreamHandler()
 ch.setLevel(logging.DEBUG)
 formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s [%(pathname)s:%(lineno)d]")
