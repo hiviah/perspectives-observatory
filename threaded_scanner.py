@@ -54,7 +54,7 @@ class ScanThread(threading.Thread):
 			return 0 # no error
 
 	def record_failure(self, e, sid):
-		logger.debug("Failed to get sid %s: %s" % (sid, e))
+		logging.debug("Failed to get sid %s: %s" % (sid, e))
 		stats.failures += 1
 		if type(e) == type(self.timeout_exc): 
 			stats.failure_timeouts += 1
@@ -100,9 +100,9 @@ class StorageThread(threading.Thread):
 			try:
 				(sid, fp) = scan_result
 				notary_common.report_observation(sid, fp)
-				logger.debug("Storing sid %s" % sid)
+				logging.debug("Storing sid %s" % sid)
 			except Exception, e:
-				logger.exception("Failed to store result %s")
+				logging.exception("Failed to store result %s")
 			
 			self.result_queue.task_done()
 		
@@ -131,15 +131,8 @@ if len(sys.argv) != 5:
 config.config_initialize(sys.argv[1])
 db.db_initialize(config.Config)
 
-# create custom logger - psycopg2 interferes with top-level "logging" module logger
-logger = logging.getLogger('threaded_scanner')
-logger.setLevel(logging.DEBUG)
-logger.propagate = False
-ch = logging.StreamHandler()
-ch.setLevel(logging.DEBUG)
-formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s [%(pathname)s:%(lineno)d]")
-ch.setFormatter(formatter)
-logger.addHandler(ch)
+logging.basicConfig(level=logging.DEBUG,
+	format="%(asctime)s %(levelname)s %(message)s [%(pathname)s:%(lineno)d]")
 
 
 if sys.argv[2] == "-": 
@@ -155,8 +148,8 @@ thread_count = int(sys.argv[3])
 timeout_sec = int(sys.argv[4]) 
 start_time = time.time()
 localtime = time.asctime( time.localtime(start_time) )
-logger.info("Starting scan at: %s" % localtime)
-logger.info("Timeout = %s sec  Thread count = %s" % (timeout_sec, thread_count) )
+logging.info("Starting scan at: %s" % localtime)
+logging.info("Timeout = %s sec  Thread count = %s" % (timeout_sec, thread_count) )
 
 # reading all sids was necessary with sqlite when piped with utilities/list_service_ids.py
 # to prevent sqlite lockup, but is no longer necessary
@@ -177,24 +170,24 @@ for sid_str in all_sids:
 	try:
 		sid = notary_common.ObservedServer(sid_str)
 	except ValueError:
-		logger.debug("Skipping sid %s: malformed")
+		logging.debug("Skipping sid %s: malformed")
 	# ignore non SSL services
 	if sid.service_type == sid.SSL:
 		que.put(sid)
 		
 try:
-	logger.debug("Wating for scans to finish")
+	logging.debug("Wating for scans to finish")
 	que.join()
-	logger.debug("Scans finished")
+	logging.debug("Scans finished")
 	result_queue.join()
-	logger.debug("Scans stored")
+	logging.debug("Scans stored")
 
 except KeyboardInterrupt: 
 	exit(1)	
 
 duration = int(time.time() - start_time)
 localtime = time.asctime( time.localtime(start_time) )
-logger.info("Ending scan at: %s" % localtime)
-logger.info("Scan of %s services took %s seconds.  %s Failures" % (len(all_sids),duration, stats.failures))
+logging.info("Ending scan at: %s" % localtime)
+logging.info("Scan of %s services took %s seconds.  %s Failures" % (len(all_sids),duration, stats.failures))
 exit(0) 
 

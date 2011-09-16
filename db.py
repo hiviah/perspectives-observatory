@@ -36,7 +36,16 @@ reused. Note that cherrypy itself is threaded with 10 threads default.
 import threading
 
 from psycopg2.extras import DictCursor
-from psycopg2.pool import ThreadedConnectionPool
+
+#following ugliness is workaround for psycopg < 2.2.2 messing with logging system
+try:
+	import logging
+	tmp = logging.basicConfig
+	logging.basicConfig = lambda **kwargs: None
+	from psycopg2.pool import ThreadedConnectionPool
+	logging.basicConfig = tmp
+except:
+	raise
 
 Db = None #singleton database connection pool, see db_initialize()
 
