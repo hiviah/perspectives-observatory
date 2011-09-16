@@ -15,6 +15,7 @@
 #   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import cherrypy
+from cherrypy.process.plugins import Daemonizer
 from xml.dom.minidom import parseString, getDOMImplementation
 import struct
 import base64
@@ -25,6 +26,7 @@ import threading
 from ssl_scan_sock import attempt_observation_for_service, SSLScanTimeoutException
 import traceback 
 import notary_common
+import logging
 
 import config
 import db
@@ -64,7 +66,7 @@ class NotaryHTTPServer(object):
 		@type service_id: notary_common.ObservedServer
 		@param version: 1 (for old md5-only) or 2 (multiple hashes, currently md5 and sha1)
 		"""
-		print "Request for '%s'" % service_id
+		logger.info("Request for '%s'" % service_id)
 		sys.stdout.flush()
 		
 		cur = db.Db.cursor()
@@ -95,11 +97,11 @@ class NotaryHTTPServer(object):
 		if len(rows) == 0: 
 			# rate-limit on-demand probes
 			if self.active_threads < 10: 
-				print "on demand probe for '%s'" % service_id  
+				logger.debug("on demand probe for '%s'" % service_id)
 				t = OnDemandScanThread(service_id,10,self)
 				t.start()
 			else: 
-				print "Exceeded on demand threshold, not probing '%s'" % service_id  
+				logger.debug("Exceeded on demand threshold, not probing '%s'" % service_id)
 			# return 404, assume client will re-query
 			raise cherrypy.HTTPError(404)
 	
@@ -219,11 +221,16 @@ if len(sys.argv) != 2:
 config.config_initialize(sys.argv[1])
 db.db_initialize(config.Config)
 
-cherrypy.config.update({ 'server.socket_port' : 8080,
-			 'server.socket_host' : "0.0.0.0",
-			 'request.show_tracebacks' : False,  
-			 'log.access_file' : None,  # default for production 
-			 'log.error_file' : 'error.log', 
-			 'log.screen' : False } ) 
-cherrypy.quickstart(NotaryHTTPServer(config.Config))
+# create custom logger to not interfere with cherrypy logging
+logger = logging.getLogger('notary_http')
+logger.setLevel(config.Config.app_loglevel)
+logger.propagate = False
+ch = logging.FileHandler(config.Config.app_log)
+ch.setLevel(config.Config.app_loglevel)
+formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s [%(pathname)s:%(lineno)d]")
+ch.setFormatter(formatter)
+logger.addHandler(ch)
+
+#Daemonizer(cherrypy.engine).subscribe()
+cherrypy.quickstart(NotaryHTTPServer(config.Config), "/", config.Config.cherrypy_config)
 

@@ -14,7 +14,8 @@
 #   You should have received a copy of the GNU General Public License
 #   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from ConfigParser import SafeConfigParser
+import logging
+import ConfigParser
 
 
 Config = None #singleton NotaryServerConfig instance
@@ -26,7 +27,7 @@ class NotaryServerConfig(object):
 		"""Parses supplied config file, see notary.config.sample
 		@raises ConfigParser.Error if entries are badly formed or missing
 		"""
-		parser = SafeConfigParser()
+		parser = ConfigParser.SafeConfigParser()
 		parser.read(filename)
 
 		self.db_host = parser.get("database", "host")
@@ -40,6 +41,24 @@ class NotaryServerConfig(object):
 		self.keyfile = parser.get("keys", "private")
 
 		self.use_sni = parser.getboolean("server", "use_sni")
+		
+		self.app_log = parser.get("server", "app_log")
+		self.app_loglevel = self.convertLoglevel(parser.get("server", "app_loglevel"))
+		self.scanner_log = parser.get("server", "scanner_log")
+		self.scanner_loglevel = self.convertLoglevel(parser.get("server", "scanner_loglevel"))
+		
+		self.cherrypy_config = parser.get("server", "cherrypy_config")
+		
+	
+	@staticmethod
+	def convertLoglevel(levelString):
+		"""Converts string 'debug', 'info', etc. into corresponding
+		logging.XXX value which is returned.
+		@raises ConfigParser.Error if the level is undefined"""
+		try:
+			return getattr(logging, levelString.upper())
+		except AttributeError:
+			raise ConfigParser.Error("No such loglevel - %s" % levelString)
 
 def config_initialize(filename):
 	"""Initializes Config singleton object using the specifiled filename

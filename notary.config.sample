@@ -6,7 +6,7 @@
 [database]
 host = localhost
 port = 5432
-user = postgres
+user = perspectives
 password = db_password
 dbname = perspectives
 #note that cherrypy uses up to 10 threads by default and there can be up to 10
@@ -17,10 +17,25 @@ max_connections = 20
 #Configuration of signing keys
 # private - full path to private signing key for responses
 [keys]
-private = /full/path/to/notary.priv
+private = notary.priv
 
-#Server options
-# use_sni - whether Server Name Indication should be used when scanning, leave
-#   enabled unless your openssl is older than 0.9.8j
+#Notary server options:
+# use_sni - whether Server Name Indication should be used when scanning
+#
+# Logging: - loglevel can be one of debug, info, warning, error, critical
+#          - empty logfile name will cause log to stderr
+#
+# app_log - logfile for application (notary_http.py)
+# app_loglevel - loglevel for application
+# scanner_log - logfile for threaded_scanner
+# scanner_loglevel - loglevel for scanner
+#
+# cherrypy_config - config file for cherrypy (HTTP wrapper)
 [server]
 use_sni = true
+app_log = app.log
+app_loglevel = info
+scanner_log = scanner.log
+scanner_loglevel = info
+cherrypy_config = cherrypy.conf
+

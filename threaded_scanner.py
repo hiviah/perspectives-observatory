@@ -131,7 +131,7 @@ if len(sys.argv) != 5:
 config.config_initialize(sys.argv[1])
 db.db_initialize(config.Config)
 
-logging.basicConfig(level=logging.DEBUG,
+logging.basicConfig(filename=config.Config.scanner_log, level=config.Config.scanner_loglevel,
 	format="%(asctime)s %(levelname)s %(message)s [%(pathname)s:%(lineno)d]")
 
 

@@ -78,8 +78,10 @@ the public key should be used by the notary client):
 
 3. Edit config
 
-Copy the 'notary.config.sample' file to 'notary.config', set your DB user/password,
-paths to private key file and logs.
+Copy the 'notary.config.sample' file to 'notary.config', set your DB
+user/password there.  Copy 'cherrypy.conf.sample' to 'cherrypy.conf'. You may
+wish to edit things such as logfile locations, listen port, etc. but defaults
+should be fine for most.
  
  ===== RUNNING ====
 
