@@ -76,7 +76,7 @@ class DbPool(object):
 			password = self.password,
 			database = self.db_name)
 
-	def cursor(self):
+	def cursor(self, **kwargs):
 		"""Creates and returns cursor for current thread's connection.
 		Cursor is a "dict" cursor, so you can access the columns by
 		names (not just indices), e.g.:
@@ -86,8 +86,14 @@ class DbPool(object):
 		id = row['id']
 		
 		You should close() the cursor and commit() or rollback() when
-		done with the transaction."""
-		return self.connection().cursor(cursor_factory=DictCursor)
+		done with the transaction.
+		
+		@param kwargs: currently string parameter 'name' is supported.
+		Named cursors are for server-side cursors, which
+		are useful when fetching result of a large query via fetchmany()
+		method. See http://initd.org/psycopg/docs/usage.html#server-side-cursors
+		"""
+		return self.connection().cursor(cursor_factory=DictCursor, **kwargs)
 	
 	def connection(self):
 		"""Return connection for this thread"""
