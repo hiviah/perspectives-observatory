@@ -46,7 +46,7 @@ def attempt_observation_for_service(service_id, timeout):
 	if p2.returncode != 0:
 		raise Exception("ERROR: Could not fetch/decode certificate for '%s'" % service_id.host_port) 
 
-	return notary_common.Observation(output)
+	return notary_common.Observation([output])
 
 
 if __name__ == "__main__":

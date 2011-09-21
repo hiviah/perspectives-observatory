@@ -128,7 +128,7 @@ def get_server_cert_from_protocol(proto_data):
 	cert_len = (b1 << 16) | (b2 << 8) | b3
 	cert = proto_data[3: 3 + cert_len]
 	
-	return notary_common.Observation(cert)
+	return notary_common.Observation([cert])
 
 def attempt_observation_for_service(service_id, timeout_sec):
 		"""Run observation for service

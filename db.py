@@ -85,8 +85,7 @@ class DbPool(object):
 		row = cursor.fetchone()
 		id = row['id']
 		
-		You should close() the cursor and commit() or rollback() when
-		done with the transaction.
+		Server-side cursors (named cursors) should be closed explicitly.
 		
 		@param kwargs: currently string parameter 'name' is supported.
 		Named cursors are for server-side cursors, which
@@ -100,7 +99,10 @@ class DbPool(object):
 		return self.pool.getconn(id(threading.current_thread()))
 
 	def commit(self):
-		"""Commit all the commands in this transaction in this thread's connection"""
+		"""Commit all the commands in this transaction in this thread's
+		connection. If errors (e.g. duplicate key) arose, this will
+		cause transaction rollback.
+		"""
 		self.connection().commit()
 
 	def rollback(self):
