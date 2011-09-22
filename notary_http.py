@@ -60,22 +60,18 @@ class NotaryHTTPServer(object):
 		colonized_hexstr = fmt % struct.unpack("%dB"%len(b), b)
 		return colonized_hexstr.lower()
 
-	def get_xml(self, service_id, version=1):
+	def get_xml(self, service_id):
 		"""Return xml with certificates' fingerprints.
 		@param service_id: requested service
 		@type service_id: notary_common.ObservedServer
-		@param version: 1 (for old md5-only) or 2 (multiple hashes, currently md5 and sha1)
 		"""
 		logger.info("Request for '%s'" % service_id)
-		sys.stdout.flush()
 		
 		cur = db.Db.cursor()
-		sql = """SELECT md5, sha1, start_ts, end_ts FROM observations_view
-			WHERE host = %s AND
-				port = %s AND
-				service_type = %s
+		sql = """SELECT certificate, start_ts, end_ts FROM observations_view
+			WHERE host = %s AND port = %s
 			"""
-		sql_data = (service_id.host, service_id.port, service_id.service_type)
+		sql_data = (service_id.host, service_id.port)
 		cur.execute(sql, sql_data)
 		rows = cur.fetchall()
 		db.Db.commit()
@@ -84,11 +80,10 @@ class NotaryHTTPServer(object):
 		keys = []
 
 		for row in rows:
-			md5_fp = str(row['md5']) #DB query returns MD5 and SHA1 as binary buffer()
-			#hashes other than md5 might not be present in older DB records
-			sha1_fp = row['sha1'] is not None and str(row['sha1']) or None
+			cert = str(row['certificate'])
+			md5_fp = hashlib.md5(cert).digest()
 			
-			k = (md5_fp, sha1_fp)
+			k = md5_fp
 			if k not in timestamps_by_key:
 				timestamps_by_key[k] = []
 				keys.append(k)
@@ -108,22 +103,20 @@ class NotaryHTTPServer(object):
 		dom_impl = getDOMImplementation() 
 		new_doc = dom_impl.createDocument(None, "notary_reply", None) 
 		top_element = new_doc.documentElement
-		top_element.setAttribute("version", str(version)) 
+		top_element.setAttribute("version", "1") 
 		top_element.setAttribute("sig_type", "rsa-md5") 
 	
 		## Packed data format:
 		#service-id (variable length, terminated with null-byte) 
 		#num_timespans (2-bytes)
-		#key_len_bytes (2-bytes, 16 for version 1 - md5 only; version 2 has
-		#	the length as sum of all various hashes, e.g. 16+20=36 for md5 and sha1
+		#key_len_bytes (2-bytes, 16 for version 1 - md5 only)
 		#key type (1-byte), always has a value of 3 for SSL 
-		#key data (length specified in key_len_bytes; fingerprints themselves are
-		#	ordered alphabetically, i.e. bytes of md5, then bytes of sha1 hash)
+		#key (md5) data (length specified in key_len_bytes)
 		#list of timespan start,end pairs  (length is 2 * 4 * num_timespans)
 		packed_data = ""
 	
 		for k in keys:
-			(md5_fp, sha1_fp) = k
+			md5_fp = k
 			key_elem = new_doc.createElement("key")
 			key_elem.setAttribute("type","ssl")
 			
@@ -131,14 +124,7 @@ class NotaryHTTPServer(object):
 			fp_len = len(md5_fp)
 			fp_bytes = md5_fp
 			
-			if version == 1:
-				key_elem.setAttribute("fp", self._unpack_hex_with_colons(md5_fp))
-			else:
-				key_elem.setAttribute("md5", self._unpack_hex_with_colons(md5_fp))
-				if sha1_fp is not None: #can be NULL in DB for compatibility reasons
-					fp_len += len(sha1_fp)
-					fp_bytes += sha1_fp
-					key_elem.setAttribute("sha1", self._unpack_hex_with_colons(sha1_fp))
+			key_elem.setAttribute("fp", self._unpack_hex_with_colons(md5_fp))
 			
 			top_element.appendChild(key_elem)
 			num_timespans = len(timestamps_by_key[k])
@@ -169,22 +155,20 @@ class NotaryHTTPServer(object):
 		top_element.setAttribute("sig",sig)
 		return top_element.toprettyxml() 
 
-	def index(self, host=None, port=None, service_type=None, version="1"):
+	def index(self, host=None, port=None, service_type=None):
 		"""
 		Return signed XML response for given host, port and service.
 		
 		@param host: hostname
 		@param port: port where service runs
-		@param service_type: 1 (ssh) or 2 (ssl), see notary_common.ObservedServer
-		@param version: response version, current version is 1 (with md5 hash only),
-			future versions will provide more hashes
+		@param service_type: 1 (ssh) or 2 (ssl), although type 1 is obsolete
 		"""
-		if (host == None or port == None or service_type == None or version not in ("1", "2")): 
+		if (host == None or port == None or service_type == None): 
 			raise cherrypy.HTTPError(400)
 		cherrypy.response.headers['Content-Type'] = 'text/xml'
-		observed = notary_common.ObservedServer(str(host + ":" + port + "," + service_type))
+		observed = notary_common.ObservedServer(str(host + ":" + port))
 		
-		return self.get_xml(observed, int(version))
+		return self.get_xml(observed)
 
 	index.exposed = True
 

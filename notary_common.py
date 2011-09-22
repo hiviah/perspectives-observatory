@@ -38,7 +38,7 @@ class ObservedServer(object):
 		self.host = (m.group(1)).lower() #force lowercase of hostname
 		self.port = int(m.group(2))
 		
-		if not self.port > 0 and self.port < 65536:
+		if not (self.port > 0 and self.port < 65536):
 			raise ValueError("Invalid port in service_id %s" % service_id)
 
 	def __str__(self):
@@ -267,7 +267,9 @@ def report_observation(service_id, observation):
 	inserting multiple observations with same parts of chain). In such
 	case the whole transaction is rolled back.
 	"""
-
+	#TODO: this transaction is rather long, it might be a good idea to split
+	#it into several smaller transactions at the cost of possibly losing
+	#the ties between certs in chain or losing certs higher in the chain
 	cur_time = datetime.now()
 
 	#Select last certificate and check if it's the same.

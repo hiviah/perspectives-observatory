@@ -169,11 +169,9 @@ storage_thread.start()
 for sid_str in all_sids:
 	try:
 		sid = notary_common.ObservedServer(sid_str)
+		que.put(sid)
 	except ValueError:
 		logging.debug("Skipping sid %s: malformed")
-	# ignore non SSL services
-	if sid.service_type == sid.SSL:
-		que.put(sid)
 		
 try:
 	logging.debug("Wating for scans to finish")

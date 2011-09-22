@@ -23,10 +23,8 @@ import time
 
 # querying the notaries over the HTTP webservice interface
 def fetch_notary_xml(notary_server, notary_port, service_id): 
-	host = service_id.split(":")[0] 
-	port = service_id.split(":")[1].split(",")[0] 
-	service_type = service_id.split(",")[1]
-	url = "http://%s:%s/?host=%s&port=%s&service_type=%s" % (notary_server, notary_port, host,port,service_type)
+	host, port = service_id.split(":")
+	url = "http://%s:%s/?host=%s&port=%s&service_type=2" % (notary_server, notary_port, host,port)
 	url_file = urllib.urlopen(url)
 	xml_text = url_file.read()
 	code = url_file.getcode()
