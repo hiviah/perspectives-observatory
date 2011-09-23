@@ -1,6 +1,6 @@
 #   This file is part of the Perspectives Notary Server
 #
-#   Copyright (C) 2011 Ondrej Mikle, cz.nic
+#   Copyright (C) 2011 Ondrej Mikle, CZ.NIC Labs
 #
 #   This program is free software: you can redistribute it and/or modify
 #   it under the terms of the GNU General Public License as published by

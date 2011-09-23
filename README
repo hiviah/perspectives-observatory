@@ -17,7 +17,7 @@ Author: Ondrej Mikle, ondrej.mikle @ {gmail.com, nic.cz}
  ==== PREREQUISITES ====
 
 The implementation relies on python >= 2.5 and the following packages:
-* PostgreSQL
+* PostgreSQL (>=8.3, tested on 8.4.x and 9.0.x)
 * psycopg2
 * M2Crypto
 * cherrypy3 
@@ -37,8 +37,8 @@ yum install postgresql postgresql-server m2crypto python-psycopg2 python-cherryp
 
 Here we assume the database runs on localhost (it should run either on localhost
 or LAN, psycopg does not support reconnects). Note that this setup may vary
-depending on PostgreSQL version and Linux distribution. The DB setup is a bit
-tedious, though.
+depending on PostgreSQL version and Linux distribution. The DB setup is probably
+the most tedious part.
 
 Start the server:
 
@@ -68,6 +68,14 @@ Change to user 'perspectives' and create DB schema:
 % cd /the/directory/with/Perspectives_source_code
 % psql -U perspectives -h localhost perspectives < sql/00_create.sql
 
+Check 'pg_hba.conf' configuration file of PostgreSQL. The location varies
+depending on distribution and PostgreSQL version, e.g.:
+    Debian 6: /etc/postgresql/8.4/main/pg_hba.conf
+    Scientific Linux 6 (RHEL 6/CentOS 6): /var/lib/pgsql/data/pg_hba.conf
+This file (scroll to the end) specifies how local (socket/localhost) connections
+are authenticated. You'll most likely want to use 'md5' or 'pam' authentication
+instead of 'ident' or 'password'.
+
 
 2. Create keypair
 
@@ -91,11 +99,11 @@ Run the webserver in its own window (or in the background):
 
 To run a scan:  
 
-% python ssl_scan_sock.py www.google.com:443,2 notary.config
+% python ssl_scan_sock.py www.google.com:443 notary.config
 
 To test, run a query for a service-id you have scanned:
 
-% python utilities/simple_client.py www.google.com:443,2 localhost 8080 notary.pub
+% python utilities/simple_client.py www.google.com:443 localhost 8080 notary.pub
 
 You could also fetch the results with a webbrowser, though you will need to 'view source'
 to see the XML:  http://localhost:8080/?host=www.google.com&port=443&service_type=2
