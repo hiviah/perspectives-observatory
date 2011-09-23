@@ -175,14 +175,15 @@ def store_ca_chain_certs(observation):
 	#md5(cert) is used in query because index is built over md5(cert)
 	sql_get = """
 		SELECT id, certificate FROM ca_certs
-			WHERE md5(certificate) = md5(%s)
+			WHERE md5(certificate) = %s
 		"""
 	sql_insert = """INSERT INTO ca_certs (certificate) VALUES (%s) RETURNING id"""
 	
 	for ca_cert in observation.ca_certs():
 		#first try to find cert, most times at most one row will be
 		#returned from the following query
-		sql_data = (ca_cert,)
+		ca_cert_md5 = hashlib.md5(ca_cert).hexdigest()
+		sql_data = (ca_cert_md5,)
 		cursor.execute(sql_get, sql_data)
 		rows = cursor.fetchall()
 		
@@ -194,7 +195,7 @@ def store_ca_chain_certs(observation):
 		
 		#insert if not present
 		if not id:
-			sql_data = (ca_cert,)
+			sql_data = (buffer(ca_cert),)
 			cursor.execute(sql_insert, sql_data)
 			id = cursor.fetchone()['id']
 		
@@ -222,6 +223,31 @@ def store_ca_chain(ee_cert_id, ca_cert_ids):
 		cursor.execute(sql, sql_data)
 		chain_idx +=1
 
+def get_ca_chain(ee_cert_id):
+	"""Get CA/intermediate certs for chain from observation.
+	Commits transaction at the end.
+	
+	@param ee_cert_id: id of observation in 'ee_certs' table
+	@returns: list of DER-encoded CA certificates chaining from the EE cert
+	towards root (lower index is closer to EE cert, higher closer towards
+	root)
+	"""
+	cursor = db.Db.cursor()
+	sql = """SELECT certificate from ee_cert_x_ca_certs
+			INNER JOIN ca_certs ON (ca_cert_id = ca_certs.id)
+			WHERE ee_cert_id=%s
+			ORDER BY seq_num
+		"""
+	sql_data = (ee_cert_id,)
+	
+	try:
+		cursor.execute(sql, sql_data)
+		rows = cursor.fetchall()
+		return [str(row['certificate']) for row in rows]
+	finally:
+		db.Db.commit()
+	
+	
 def update_ee_cert_timestamp(ee_cert_id, timestamp):
 	"""Update end_time of cert in 'ee_cert' table.
 	

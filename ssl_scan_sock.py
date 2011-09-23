@@ -19,7 +19,6 @@ import socket
 import struct 
 import time
 import binascii
-import hashlib 
 import traceback 
 import sys
 import errno 
@@ -34,10 +33,16 @@ import db
 
 SLEEP_LEN_SEC = 0.2
 
-class SSLScanTimeoutException(Exception): 
+class SSLException(RuntimeError):
 	pass
 
-class SSLAlertException(Exception): 
+class SSLFormatException(SSLException):
+	pass
+
+class SSLScanTimeoutException(SSLException): 
+	pass
+
+class SSLAlertException(SSLException): 
 	
 	def __init__(self,value): 
 		self.value = value
@@ -96,20 +101,33 @@ def do_connect(s, host, port, timeout_sec):
 			else: 
 				raise e
 
-def read_record(sock,timeout_sec): 
+def read_record(sock,timeout_sec):
+	"""Reads one record from SSL/TLS record layer.
+	
+	@param sock: socket to read from
+	@param timeout_sec: read timeout
+	@returns: tuple(byte record_content_type, str inner_data_of_record)
+	"""
 	rec_start = read_data(sock,5,timeout_sec)
 	if len(rec_start) != 5: 
-		raise Exception("Error: unable to read start of record")
+		raise SSLFormatException("Error: unable to read start of record")
 
 	(rec_type, ssl_version, tls_version, rec_length) = struct.unpack('!BBBH',rec_start)
 	rest_of_rec = read_data(sock,rec_length,timeout_sec)
 	if len(rest_of_rec) != rec_length: 
-		raise Exception("Error: unable to read full record")
+		raise SSLFormatException("Error: unable to read full record")
 	return (rec_type, rest_of_rec)
 
 def get_all_handshake_protocols(rec_data):
+	"""Extract handshake protocols from inside of SSL/TLS handshake (22)
+	message.
+	
+	@param rec_data: data from tcp stream
+	@returns: list of tuples (byte handshake_type, str handshake_proto_data)
+	"""
 	protos = [] 
-	while len(rec_data) > 0: 
+	while len(rec_data) > 0:
+		#unpack handshake type and 24-bit length of inner handshake proto data
 		t, b1,b2,b3 = struct.unpack('!BBBB',rec_data[0:4])
 		l = (b1 << 16) | (b2 << 8) | b3
 		protos.append((t, rec_data[4: 4 + l]))
@@ -117,18 +135,25 @@ def get_all_handshake_protocols(rec_data):
 	return protos 
 
 # rfc 2246 says the server cert if the first one
-# in the chain, so ignore everything else 
 def get_server_cert_from_protocol(proto_data):
 	"""Extract site certificate and return observed certificate.
-	@param proto_data: server response (handshake from server hello)
+	@param proto_data: inner data from hanshake type 11 (certificates) protocol
+	(after the "length" field)
 	@return: notary_common.Observation object with cert and fingerprints
 	"""
+	certs = []
 	proto_data = proto_data[3:] # get rid of 3-bytes describing length of all certs
-	(b1,b2,b3) = struct.unpack("!BBB",proto_data[0:3])
-	cert_len = (b1 << 16) | (b2 << 8) | b3
-	cert = proto_data[3: 3 + cert_len]
 	
-	return notary_common.Observation([cert])
+	while proto_data:
+		(b1,b2,b3) = struct.unpack("!BBB",proto_data[0:3]) #length of cert
+		cert_len = (b1 << 16) | (b2 << 8) | b3
+		cert = proto_data[3: 3 + cert_len]
+		if cert_len != len(cert):
+			raise SSLFormatException("Can't read full handshake protocol")
+		certs.append(cert)
+		proto_data = proto_data[3 + cert_len:]
+	
+	return notary_common.Observation(certs)
 
 def attempt_observation_for_service(service_id, timeout_sec):
 		"""Run observation for service
