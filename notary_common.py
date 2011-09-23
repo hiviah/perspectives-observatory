@@ -71,20 +71,13 @@ class ObservedServer(object):
 		return "%s:%s" % (self.host, self.port)
 
 class Observation(object):
-	"""Class for storing observed fingeprints from various hash algorithms.
-	
-	Accessing the hashes is done by using one of the attributes named in
-	_supported_hashes, e.g. if obs is Observation instance, obs.sha1 will
-	return its sha1 hash, if any was set, otherwise it's None. The hashes
-	correspond to the leaf (server) certificates."""
-
-	_supported_hashes = ('md5', 'sha1')
+	"""Class for storing scanned certificate chains.
+	"""
 	
 	__hash__ = None
 
 	def __init__(self, cert_chain):
-		"""Initialize with certificate, computes the hashes in _supported_hashes
-		which are then stored as attributes as binary strings.
+		"""Initialize with certificate list.
 		
 		@param cert_chain: certificates chain as string list in DER encoding
 		(validity is not checked). Must be ordered from index 0 being
@@ -94,10 +87,6 @@ class Observation(object):
 		if len(cert_chain) == 0:
 			raise ValueError("Empty certificate chain")
 		self.cert_chain = list(cert_chain)
-		for hash_algo in self._supported_hashes:
-			hash = hashlib.new(hash_algo)
-			hash.update(cert_chain[0])
-			setattr(self, hash_algo, hash.digest())
 	
 	def ee_cert(self):
 		"""Returns DER encoded leaf (EE) certificate"""
@@ -110,7 +99,7 @@ class Observation(object):
 		return self.cert_chain[1:]
 	
 	def __str__(self):
-		return ",".join(["(%s: %s)" % (h, binascii.hexlify(getattr(self, h))) for h in self._supported_hashes ])
+		return "Observation: sha1: %s" % hashlib.sha1(self.ee_cert()).hexdigest()
 
 def store_service_id(service_id):
 	"""Stores service_d in 'services' table unless already present.To be run
