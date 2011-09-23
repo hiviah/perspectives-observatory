@@ -17,7 +17,7 @@
 import sys
 import os
 import re
-import time
+from datetime import datetime, timedelta
 
 import config
 import db
@@ -35,14 +35,13 @@ import db
 # considered 'live' and of all services considered 'dead'.
 
 def usage_and_exit(): 
-  print >> sys.stderr, "ERROR: usage: <notary.config> <all|older|newer> <days>"
-  exit(1)
+	print >> sys.stderr, "ERROR: usage: <notary.config> <all|older|newer> <days>"
+	exit(1)
 
 if len(sys.argv) == 4: 
 	if not (sys.argv[2] == "older" or sys.argv[2] == "newer"): 
 		usage_and_exit()
-	cur_time = int(time.time()) 
-	threshold_sec = int(int(time.time()) - (3600 * 24 * int(sys.argv[3])))
+	threshold_time = datetime.now() - timedelta(days=int(sys.argv[3]))
 elif len(sys.argv) == 3: 
 	if not sys.argv[2] == "all": 
 		usage_and_exit()
@@ -52,27 +51,40 @@ else:
 
 config.config_initialize(sys.argv[1])
 db.db_initialize(config.Config)
-cur = db.Db.cursor()
+
+#Use named (server-side) cursor to avoid too much memory consumed by normal
+#cursor. Unnamed cursor would load all results into memory even before
+#fetchone() is called (psycopg behaves this way).
+cursor = db.Db.cursor(name="list_services")
 
 
-if sys.argv[2] == "all": 
-	sql = "SELECT DISTINCT host, port, service_type FROM observations_view"
-	cur.execute(sql)
-elif sys.argv[2] == "older": 
-	sql = """SELECT DISTINCT host, port, service_type FROM observations o
-			WHERE NOT EXISTS
-				(SELECT 1 FROM observations_view v WHERE
-					o.host = v.host and
-					o.port = v.port and
-					o.service_type = v.service_type and
-					end_ts > %s)
-		"""
-	cur.execute(sql, (threshold_sec,))
-else: 
-	sql = """SELECT DISTINCT host, port, service_type FROM observations_view
-			WHERE end_ts > %s
-		"""
-	cur.execute(sql, [ threshold_sec ] )
-	
-for row in cur.fetchall():
-	print "%s:%s,%s" % (row['host'] , row['port'], row['service_type'])
+try:
+	if sys.argv[2] == "all": 
+		sql = "SELECT host, port FROM services"
+		cursor.execute(sql)
+	elif sys.argv[2] == "older": 
+		sql = """SELECT host, port FROM services
+				WHERE NOT EXISTS
+					(SELECT 1 FROM ee_certs WHERE
+						services.id = ee_certs.service_id
+						AND end_time > %s)
+			"""
+		cursor.execute(sql, (threshold_time,))
+	else: 
+		sql = """SELECT host, port FROM services
+				WHERE EXISTS
+					(SELECT 1 FROM ee_certs WHERE
+						services.id = ee_certs.service_id
+						AND end_time > %s)
+			"""
+		cursor.execute(sql, [ threshold_time ] )
+		
+	while True:
+		rows = cursor.fetchmany(20000)
+		if not rows:
+			break
+		for row in rows:
+			print "%s:%s" % (row['host'] , row['port'])
+finally:
+	cursor.close()
+	db.Db.commit()
