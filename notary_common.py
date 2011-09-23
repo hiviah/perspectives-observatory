@@ -150,6 +150,27 @@ def get_most_recent_ee_cert(service_id):
 	else:
 		return (None, None)
 	
+def get_ee_certs(service_id):
+	"""Get all observations of EE certs for given service_id.
+	To be run inside transaction.
+	
+	@param service_id: instance of ObservedServer
+	@returns: list of tuples (int id, str certificate)
+	@raises psycopg2.DatabaseError on DB error
+	"""
+	cursor = db.Db.cursor()
+	
+	sql = """SELECT id, certificate from observations_view
+			WHERE host = %s	AND port = %s
+			"""
+	sql_data = (service_id.host, service_id.port)
+
+	cursor.execute(sql, sql_data)
+	rows = cursor.fetchall()
+	
+	return [(row['id'], row['certificate']) for row in rows]
+	
+	
 def store_ca_chain_certs(observation):
 	"""Stores CA certificates from observation into 'ca_certs' table
 	unless already present. To be run inside transaction.
@@ -237,7 +258,7 @@ def get_ca_chain(ee_cert_id):
 		db.Db.commit()
 	
 	
-def update_ee_cert_timestamp(ee_cert_id, timestamp):
+def update_ee_cert_timestamp_by_id(ee_cert_id, timestamp):
 	"""Update end_time of cert in 'ee_cert' table.
 	
 	@param ee_cert_id: id of EE cert in 'ee_cert' table
@@ -251,6 +272,39 @@ def update_ee_cert_timestamp(ee_cert_id, timestamp):
 		"""
 	sql_data = (timestamp, ee_cert_id)
 	cursor.execute(sql, sql_data)
+	
+def update_ee_cert_timestamp_by_cert(service_id, cert, timestamp):
+	"""Update end_time of EE certificate observation for given service and
+	certificate. If observation with the specific certificate does not
+	exist, nothing is updated.
+	
+	@param service_id: instance of ObservedServer
+	@param cert: DER-encoded EE certificate string
+	@param timestamp: end_time will be updated to this timestamp
+	@return: number of rows updated
+	@raises psycopg2.DatabaseError on DB error
+	"""
+	cursor = db.Db.cursor()
+	sql = """SELECT id from services
+			WHERE host=%s AND port=%s
+		"""
+	sql_data = (service_id.host, service_id.port)
+	
+	cursor.execute(sql, sql_data)
+	row = cursor.fetchone()
+	if not row:
+		return 0
+	
+	services_host_id = row['id']
+	
+	sql = """UPDATE ee_certs
+			SET end_time = %s
+			WHERE service_id = %s AND certificate=%s
+		"""
+	sql_data = (timestamp, services_host_id, buffer(cert))
+	cursor.execute(sql, sql_data)
+	
+	return cursor.rowcount
 	
 def store_ee_cert(observation, db_service_id, timestamp):
 	"""Store EE cert from observation.
@@ -273,42 +327,36 @@ def store_ee_cert(observation, db_service_id, timestamp):
 	
 	return cursor.fetchone()['id']
 	
-def report_observation(service_id, observation):
+def report_observation(service_id, observation, timestamp=None):
 	"""Insert or update observation and commit to DB
 	@param service_id: ObservedServer instance
 	@param observation: Observation instance
+	@param timestamp: instance of datetime - timestamp to record. Current
+	time is used if set to None
 	
 	@raises psycopg2.DatabaseError: in case of transaction collision (e.g.
 	inserting multiple observations with same parts of chain). In such
 	case the whole transaction is rolled back.
 	"""
-	#TODO: this transaction is rather long, it might be a good idea to split
-	#it into several smaller transactions at the cost of possibly losing
-	#the ties between certs in chain or losing certs higher in the chain
-	cur_time = datetime.now()
+	#TODO: break up the transaction into small ones and LOCK ee_cert and ca_cert
+	#tables, since we can't use unique index on bytea cert fields
+	update_time = timestamp or datetime.now()
 
-	#Select last certificate and check if it's the same.
-	#If same, update end timestamp, otherwise insert new observation
+	#To deal with CDN effect (=single host appearing to have multiple
+	#certificates because of reverse proxy), update end_time timestamp for
+	#observation of host. If no observation with the certificate exists,
+	#insert new observation.
 	try:
-		(most_recent_id, most_recent_cert) = get_most_recent_ee_cert(service_id)
+		updated_count = update_ee_cert_timestamp_by_cert(service_id,
+				observation.ee_cert(), update_time)
 		
-		if most_recent_cert == observation.ee_cert():
-			# this key was also the most recently seen key before this observation.
-			# just update the observation row to set the timespan 'end' value to the 
-			# current time.
-			update_ee_cert_timestamp(most_recent_id, cur_time)
-		else: 
+		if updated_count < 1:
 			# cert has changed or no observations exist yet for this service_id.  Either way
 			# add a new entry for this key with timespan start and end set to the current time
 			db_service_id = store_service_id(service_id)
-			ee_cert_id = store_ee_cert(observation, db_service_id, cur_time)
+			ee_cert_id = store_ee_cert(observation, db_service_id, update_time)
 			ca_cert_ids = store_ca_chain_certs(observation)
 			store_ca_chain(ee_cert_id, ca_cert_ids)
-			
-			if most_recent_id:
-				# if there was a previous key, set its 'end' timespan value to be current 
-				# time, minus 1 second (like it was in original perspectives)
-				update_ee_cert_timestamp(most_recent_id, cur_time-timedelta(seconds=1))
 
 	finally:
 		db.Db.commit()
