@@ -38,7 +38,6 @@ CREATE TABLE ee_cert_x_ca_certs (
 CREATE UNIQUE INDEX services_idx ON services (host, port);
 
 CREATE INDEX ee_certs_fkey_service_idx ON ee_certs (service_id);
-CREATE INDEX ee_certs_end_time_idx ON ee_certs (end_time);
 CREATE INDEX ee_certs_x_ca_certs_service_id_idx ON ee_cert_x_ca_certs (ee_cert_id);
 
 -- Creating index on md5() is for index speedup, collision (non)-resistance is
