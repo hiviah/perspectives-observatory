@@ -97,12 +97,12 @@ class StorageThread(threading.Thread):
 	def run(self):
 		while True:
 			scan_result = self.result_queue.get()
+			(sid, fp) = scan_result
 			try:
-				(sid, fp) = scan_result
 				notary_common.report_observation(sid, fp)
 				logging.debug("Storing sid %s" % sid)
 			except Exception:
-				logging.exception("Failed to store result %s")
+				logging.exception("Failed to store result for sid %s" % sid)
 			
 			self.result_queue.task_done()
 		
