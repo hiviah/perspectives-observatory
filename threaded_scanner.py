@@ -18,7 +18,6 @@
 import sys
 import time 
 import notary_common 
-import traceback 
 import threading
 import errno
 import Queue
@@ -102,7 +101,7 @@ class StorageThread(threading.Thread):
 				(sid, fp) = scan_result
 				notary_common.report_observation(sid, fp)
 				logging.debug("Storing sid %s" % sid)
-			except Exception, e:
+			except Exception:
 				logging.exception("Failed to store result %s")
 			
 			self.result_queue.task_done()
@@ -141,7 +140,12 @@ if sys.argv[2] == "-":
 else: 
 	f = open(sys.argv[2])
 
-result_queue = Queue.Queue()
+#Limit queue sizes so that the script won't consume too much memory by
+#reading all of the sids to scan into memory at once. Helps in case
+#the number of sids is huge (like million or more).
+QUEUE_SIZE = 20000
+
+result_queue = Queue.Queue(maxsize=QUEUE_SIZE)
 
 
 stats = GlobalStats()
@@ -152,11 +156,7 @@ localtime = time.asctime( time.localtime(start_time) )
 logging.info("Starting scan at: %s" % localtime)
 logging.info("Timeout = %s sec  Thread count = %s" % (timeout_sec, thread_count) )
 
-# reading all sids was necessary with sqlite when piped with utilities/list_service_ids.py
-# to prevent sqlite lockup, but is no longer necessary
-all_sids = [ line.rstrip() for line in f ]
-
-que = Queue.Queue()
+que = Queue.Queue(maxsize=QUEUE_SIZE)
 
 for i in range(thread_count):
 	t = ScanThread(que, stats, timeout_sec)
@@ -167,8 +167,11 @@ storage_thread = StorageThread(result_queue)
 storage_thread.setDaemon(True)
 storage_thread.start()
 
-for sid_str in all_sids:
+sids_count = 0
+for line in f:
 	try:
+		sids_count += 1
+		sid_str = line.rstrip()
 		sid = notary_common.ObservedServer(sid_str)
 		que.put(sid)
 	except ValueError:
@@ -187,6 +190,6 @@ except KeyboardInterrupt:
 duration = int(time.time() - start_time)
 localtime = time.asctime( time.localtime(start_time) )
 logging.info("Ending scan at: %s" % localtime)
-logging.info("Scan of %s services took %s seconds.  %s Failures" % (len(all_sids),duration, stats.failures))
+logging.info("Scan of %s services took %s seconds.  %s Failures" % (sids_count,duration, stats.failures))
 exit(0) 
 
