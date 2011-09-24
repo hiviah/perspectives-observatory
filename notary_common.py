@@ -17,8 +17,7 @@
 
 import re
 import hashlib
-import binascii
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import db
 
@@ -352,6 +351,13 @@ def report_observation(service_id, observation, timestamp=None):
 				observation.ee_cert(), update_time)
 		
 		if updated_count < 1:
+			#update most recent older cert for the service_id to make it seem
+			#"continuous" when viewed by perspectives SVG viewer in Firefox,
+			#which mostly makes sense in case of normal (non-CDN) cert rollover
+			(recent_ee_cert_id, _) = get_most_recent_ee_cert(service_id)
+			if recent_ee_cert_id:
+				update_ee_cert_timestamp_by_id(recent_ee_cert_id, update_time)
+			
 			# cert has changed or no observations exist yet for this service_id.  Either way
 			# add a new entry for this key with timespan start and end set to the current time
 			db_service_id = store_service_id(service_id)
