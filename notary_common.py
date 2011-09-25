@@ -41,8 +41,15 @@ class ObservedServer(object):
 		if not (self.port > 0 and self.port < 65536):
 			raise ValueError("Invalid port in service_id %s" % service_id)
 
+	def old_str(self):
+		"""Return as 'host:port,2' string. This is for compatibility
+		with old Perspectives code, e.g. for signing XML responses for
+		Firefox extension.
+		"""
+		return "%s:%s,2" % (self.host, self.port)
+
 	def __str__(self):
-		"""Returns the old form of "host:port" """
+		"""Returns as 'host:port' string."""
 		return "%s:%s" % (self.host, self.port)
 
 	def __repr__(self):
@@ -64,11 +71,6 @@ class ObservedServer(object):
 	
 	def __cmp__(self, other):
 		return cmp(self._id(), other._id())
-
-	@property
-	def host_port(self):
-		"""Return connect string in 'host:port' format"""
-		return "%s:%s" % (self.host, self.port)
 
 class Observation(object):
 	"""Class for storing scanned certificate chains.

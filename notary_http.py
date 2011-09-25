@@ -17,20 +17,20 @@
 
 import cherrypy
 from cherrypy.process.plugins import Daemonizer
-from xml.dom.minidom import parseString, getDOMImplementation
+from xml.dom.minidom import getDOMImplementation
 import struct
 import base64
 import hashlib
-from M2Crypto import BIO, RSA, EVP
+from M2Crypto import BIO, RSA
 import sys
 import threading 
-from ssl_scan_sock import attempt_observation_for_service, SSLScanTimeoutException
-import traceback 
+from ssl_scan_sock import attempt_observation_for_service
 import notary_common
 import logging
 
 import config
 import db
+import psycopg2
 
 class NotaryHTTPServer(object):
 
@@ -144,7 +144,7 @@ class NotaryHTTPServer(object):
 				ts_bytes += struct.pack("!I", ts_end)
 			packed_data =(head + fp_bytes + ts_bytes) + packed_data   
 	
-		packed_data = str(service_id) + struct.pack("B", 0) + packed_data 
+		packed_data = service_id.old_str() + struct.pack("B", 0) + packed_data 
 	
 		m = hashlib.md5()
 		m.update(packed_data)
@@ -187,8 +187,10 @@ class OnDemandScanThread(threading.Thread):
 		try:
 			fp = attempt_observation_for_service(self.sid, self.timeout_sec)
 			notary_common.report_observation(self.sid, fp)
-		except Exception, e:
-			traceback.print_exc(file=sys.stdout)
+		except psycopg2.DatabaseError:
+			logger.exception("Failed to store '%s'" % self.sid)
+		except Exception:
+			logger.info("Failed to scan %s" % self.sid)
 		finally:
 			#return connection back to pool, otherwise it won't know it's
 			#not used anymore

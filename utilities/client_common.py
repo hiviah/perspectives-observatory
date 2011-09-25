@@ -60,7 +60,10 @@ def verify_notary_signature(service_id, notary_xml_text, notary_pub_key_text):
 		packed_data =(head + fp_bytes + ts_bytes) + packed_data   
 
 
-	packed_data = service_id +  struct.pack("B",0) + packed_data
+	#The "magic ',2'" is for compatibility with old Perspectives code. It
+	#stands for service_type SSL, old Perspectives had
+	#"host:port,service_type" as service_id string.
+	packed_data = service_id + ",2" +  struct.pack("B",0) + packed_data
 
 	sig_raw = base64.standard_b64decode(notary_reply.getAttribute("sig")) 
 	bio = BIO.MemoryBuffer(notary_pub_key_text)
