@@ -166,7 +166,7 @@ class NotaryHTTPServer(object):
 		"""
 		if (host == None or port == None or service_type == None): 
 			raise cherrypy.HTTPError(400)
-		if service_type != 2:
+		if service_type != "2":
 			#we server only SSL, SSH is obsolete
 			raise cherrypy.HTTPError(404)
 		cherrypy.response.headers['Content-Type'] = 'text/xml'
