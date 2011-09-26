@@ -144,8 +144,8 @@ class Observation(object):
 		return "Observation: sha1: %s" % hashlib.sha1(self.ee_cert()).hexdigest()
 
 def store_service_id(service_id):
-	"""Stores service_d in 'services' table unless already present.To be run
-	inside a transaction.
+	"""Stores service_d in 'services' table unless already present. Commits
+	transaction.
 	
 	@param service_id: ObservedServer instance
 	@returns: stored service id
@@ -155,20 +155,24 @@ def store_service_id(service_id):
 	cursor = db.Db.cursor()
 	
 	sql_data = (service_id.host, service_id.port)
-	cursor.execute(sql, sql_data)
-	row = cursor.fetchone()
-	if row:
-		return row['id']
 	
-	sql = """INSERT INTO services (host, port) VALUES (%s, %s)
-			RETURNING id
-		"""
-	cursor.execute(sql, sql_data)
-	return cursor.fetchone()['id']
+	try:
+		cursor.execute(sql, sql_data)
+		row = cursor.fetchone()
+		if row:
+			return row['id']
+		
+		sql = """INSERT INTO services (host, port) VALUES (%s, %s)
+				RETURNING id
+			"""
+		cursor.execute(sql, sql_data)
+		return cursor.fetchone()['id']
+	finally:
+		db.Db.commit()
 
 def get_most_recent_ee_cert(service_id):
 	"""Get most recent observation of EE certficate for service_id.
-	To be run inside transaction.
+	Commits transaction.
 	
 	@param service_id: instance of ObservedServer
 	@returns: tuple (id, certificate) if found as (int, str),
@@ -183,18 +187,21 @@ def get_most_recent_ee_cert(service_id):
 			LIMIT 1
 			"""
 	sql_data = (service_id.host, service_id.port)
-
-	cursor.execute(sql, sql_data)
-	row = cursor.fetchone()
 	
-	if row is not None:
-		return (row['id'], str(row['certificate']))
-	else:
-		return (None, None)
+	try:
+		cursor.execute(sql, sql_data)
+		row = cursor.fetchone()
+		
+		if row is not None:
+			return (row['id'], str(row['certificate']))
+		else:
+			return (None, None)
+	finally:
+		db.Db.commit()
 	
 def get_ee_certs(service_id):
 	"""Get all observations of EE certs for given service_id.
-	To be run inside transaction.
+	Commits transaction.
 	
 	@param service_id: instance of ObservedServer
 	@returns: list of tuples (int id, str certificate)
@@ -206,16 +213,19 @@ def get_ee_certs(service_id):
 			WHERE host = %s	AND port = %s
 			"""
 	sql_data = (service_id.host, service_id.port)
-
-	cursor.execute(sql, sql_data)
-	rows = cursor.fetchall()
 	
-	return [(row['id'], row['certificate']) for row in rows]
+	try:
+		cursor.execute(sql, sql_data)
+		rows = cursor.fetchall()
+		
+		return [(row['id'], row['certificate']) for row in rows]
+	finally:
+		db.Db.commit()
 	
 	
 def store_ca_chain_certs(observation):
 	"""Stores CA certificates from observation into 'ca_certs' table
-	unless already present. To be run inside transaction.
+	unless already present. Commits transaction.
 	
 	@param observation: Observation instance
 	@returns: list of ids of stored CA certs from 'ca_certs' table
@@ -236,29 +246,37 @@ def store_ca_chain_certs(observation):
 		#returned from the following query
 		ca_cert_md5 = hashlib.md5(ca_cert).hexdigest()
 		sql_data = (ca_cert_md5,)
-		cursor.execute(sql_get, sql_data)
-		rows = cursor.fetchall()
 		
-		id = None
-		for row in rows:
-			if ca_cert == str(row['certificate']):
-				id = row['id']
-				break
-		
-		#insert if not present
-		if not id:
-			sql_data = (buffer(ca_cert),)
-			cursor.execute(sql_insert, sql_data)
-			id = cursor.fetchone()['id']
-		
-		cert_ids.append(id)
+		try:
+			#The lock prevents insertion of non-unique CA certs
+			#since we can't have unique index on bytea certificate
+			#field.
+			#cursor.execute("LOCK TABLE ca_certs");
+			cursor.execute(sql_get, sql_data)
+			rows = cursor.fetchall()
+			
+			id = None
+			for row in rows:
+				if ca_cert == str(row['certificate']):
+					id = row['id']
+					break
+			
+			#insert if not present
+			if not id:
+				sql_data = (buffer(ca_cert),)
+				cursor.execute(sql_insert, sql_data)
+				id = cursor.fetchone()['id']
+			
+			cert_ids.append(id)
+		finally:
+			db.Db.commit() #commits and unlocks ca_certs table
 		
 	return cert_ids
 
 def store_ca_chain(ee_cert_id, ca_cert_ids):
 	"""Store the relation of EE cert and CA certs belonging to the same
 	certificate chain represented in table 'ee_cert_x_ca_certs'.
-	To be run inside transaction.
+	Commits the transaction.
 	
 	@param ee_cert_id: id of EE leaf certificate in chain in 'ee_certs' table
 	@param ca_cert_ids: ids of CA certificates in 'ca_certs' table
@@ -268,12 +286,15 @@ def store_ca_chain(ee_cert_id, ca_cert_ids):
 	sql = """INSERT INTO ee_cert_x_ca_certs (seq_num, ee_cert_id, ca_cert_id)
 			VALUES (%s, %s, %s)
 		"""
-	
-	chain_idx = 0 #goes upwards then getting closer to root cert
-	for ca_cert_id in ca_cert_ids:
-		sql_data = (chain_idx, ee_cert_id, ca_cert_id)
-		cursor.execute(sql, sql_data)
-		chain_idx +=1
+		
+	try:
+		chain_idx = 0 #goes upwards then getting closer to root cert
+		for ca_cert_id in ca_cert_ids:
+			sql_data = (chain_idx, ee_cert_id, ca_cert_id)
+			cursor.execute(sql, sql_data)
+			chain_idx +=1
+	finally:
+		db.Db.commit()
 
 def get_ca_chain(ee_cert_id):
 	"""Get CA/intermediate certs for chain from observation.
@@ -302,9 +323,11 @@ def get_ca_chain(ee_cert_id):
 	
 def update_ee_cert_timestamp_by_id(ee_cert_id, timestamp):
 	"""Update end_time of cert in 'ee_cert' table.
+	Commits the transaction.
 	
 	@param ee_cert_id: id of EE cert in 'ee_cert' table
 	@param timestamp: end_time will be updated to this timestamp
+	@returns: number of rows updated
 	@raises psycopg2.DatabaseError on DB error
 	"""
 	cursor = db.Db.cursor()
@@ -313,12 +336,16 @@ def update_ee_cert_timestamp_by_id(ee_cert_id, timestamp):
 			WHERE id = %s
 		"""
 	sql_data = (timestamp, ee_cert_id)
-	cursor.execute(sql, sql_data)
+	try:
+		cursor.execute(sql, sql_data)
+		return cursor.rowcount
+	finally:
+		db.Db.commit()
 	
 def update_ee_cert_timestamp_by_cert(service_id, cert, timestamp):
 	"""Update end_time of EE certificate observation for given service and
 	certificate. If observation with the specific certificate does not
-	exist, nothing is updated.
+	exist, nothing is updated. Commits the transaction.
 	
 	@param service_id: instance of ObservedServer
 	@param cert: DER-encoded EE certificate string
@@ -332,24 +359,28 @@ def update_ee_cert_timestamp_by_cert(service_id, cert, timestamp):
 		"""
 	sql_data = (service_id.host, service_id.port)
 	
-	cursor.execute(sql, sql_data)
-	row = cursor.fetchone()
-	if not row:
-		return 0
-	
-	services_host_id = row['id']
-	
-	sql = """UPDATE ee_certs
-			SET end_time = %s
-			WHERE service_id = %s AND certificate=%s
-		"""
-	sql_data = (timestamp, services_host_id, buffer(cert))
-	cursor.execute(sql, sql_data)
-	
-	return cursor.rowcount
+	try:
+		cursor.execute(sql, sql_data)
+		row = cursor.fetchone()
+		if not row:
+			return 0
+		
+		services_host_id = row['id']
+		
+		sql = """UPDATE ee_certs
+				SET end_time = %s
+				WHERE service_id = %s AND certificate=%s
+			"""
+		sql_data = (timestamp, services_host_id, buffer(cert))
+		cursor.execute(sql, sql_data)
+		
+		return cursor.rowcount
+	finally:
+		db.Db.commit()
 	
 def store_ee_cert(observation, db_service_id, timestamp):
 	"""Store EE cert from observation.
+	Commits the transaction.
 	
 	@param observation: Observation instance
 	@param db_service_id: id of host in 'services' table this observation
@@ -365,9 +396,12 @@ def store_ee_cert(observation, db_service_id, timestamp):
 			RETURNING id
 		"""
 	sql_data = (timestamp, timestamp, buffer(observation.ee_cert()), db_service_id)
-	cursor.execute(sql, sql_data)
-	
-	return cursor.fetchone()['id']
+	try:
+		cursor.execute(sql, sql_data)
+		
+		return cursor.fetchone()['id']
+	finally:
+		db.Db.commit()
 	
 def report_observation(service_id, observation, timestamp=None):
 	"""Insert or update observation and commit to DB
@@ -380,33 +414,40 @@ def report_observation(service_id, observation, timestamp=None):
 	inserting multiple observations with same parts of chain). In such
 	case the whole transaction is rolled back.
 	"""
-	#TODO: break up the transaction into small ones and LOCK ee_cert and ca_cert
-	#tables, since we can't use unique index on bytea cert fields
+	#NOTE: the following process is broken down into smaller transactions.
+	#Worst case scenario is that e.g. some of the certificates will get
+	#stored, but link saying "this EE cert belongs to this chain" may be
+	#lost (whereas were it a single transaction, the EE cert would be lost
+	#as well).
 	update_time = timestamp or datetime.now()
 
 	#To deal with CDN effect (=single host appearing to have multiple
 	#certificates because of reverse proxy), update end_time timestamp for
 	#observation of host. If no observation with the certificate exists,
 	#insert new observation.
-	try:
-		updated_count = update_ee_cert_timestamp_by_cert(service_id,
-				observation.ee_cert(), update_time)
+	updated_count = update_ee_cert_timestamp_by_cert(service_id,
+			observation.ee_cert(), update_time)
+	
+	if updated_count < 1:
+		#We don't update end_time timestamp of the other last
+		#seen cert for this service like old Perspectives did.
+		#The semantics of end_time should be when the cert was
+		#actually last seen, not to attempt having "continuous"
+		#timeline in the SVG viewer.
 		
-		if updated_count < 1:
-			#We don't update end_time timestamp of the other last
-			#seen cert for this service like old Perspectives did.
-			#The semantics of end_time should be when the cert was
-			#actually last seen, not to attempt having "continuous"
-			#timeline in the SVG viewer.
-			
-			# Observation for service with this cert not seen yet,
-			# insert new observation.
-			db_service_id = store_service_id(service_id)
-			ee_cert_id = store_ee_cert(observation, db_service_id, update_time)
-			ca_cert_ids = store_ca_chain_certs(observation)
-			store_ca_chain(ee_cert_id, ca_cert_ids)
-
-	finally:
-		db.Db.commit()
+		# Observation for service with this cert not seen yet,
+		# insert new observation.
+		db_service_id = store_service_id(service_id)
+		ee_cert_id = store_ee_cert(observation, db_service_id, update_time)
+		ca_cert_ids = store_ca_chain_certs(observation)
+		store_ca_chain(ee_cert_id, ca_cert_ids)
+		
+	elif updated_count > 1:
+		#There is a remotely small possibility of two identical EE cert
+		#for host being stored, but that can be detected easily and
+		#cleaned up. Otherwise we'd have to lock 'ee_certs' table since
+		#we can't use unique index over bytea. Locking would in turn
+		#impact all reads fetched for clients.
+		logger.warn("Duplicate EE cert for service '%s'" % service_id)
 
 
