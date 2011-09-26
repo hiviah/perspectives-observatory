@@ -17,10 +17,50 @@
 
 import re
 import hashlib
+import threading
 from datetime import datetime
 
 import db
 
+import logging
+logger = logging
+
+def set_logger(logger_object):
+	"""Set the logger object used for logging in this module. It has to have
+	interface like python's built-in 'logging' module or logging.Logger.
+	The whole deal with this is the possibility to have logger that does
+	not interfere with cherrypy and psycopg2 logging.
+	"""
+	global logger
+	logger = logger_object
+
+class StorageThread(threading.Thread):
+	"""Thread storing scanned observations into database."""
+	
+	def __init__(self, result_queue):
+		"""Initialize thread to store data from result queue.
+		@param result_queue: a Queue.Queue instance, where each item
+		read is tuple (notary_common.ObservedServer, notary_common.Observation)
+		"""
+		self.result_queue = result_queue
+		threading.Thread.__init__(self)
+	
+	def run(self):
+		"""Run thread. The threads wakes up when result queue gets a
+		result put in, stores it in DB, then waits again until queue
+		has something to store.
+		"""
+		while True:
+			scan_result = self.result_queue.get()
+			(sid, fp) = scan_result
+			try:
+				report_observation(sid, fp)
+				logger.debug("Storing sid %s" % sid)
+			except Exception:
+				logger.exception("Failed to store result for sid %s" % sid)
+			
+			self.result_queue.task_done()
+		
 class ObservedServer(object):
 	"""Represents scanned server - host, port, service"""
 

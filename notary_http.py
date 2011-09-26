@@ -27,10 +27,10 @@ import threading
 from ssl_scan_sock import attempt_observation_for_service
 import notary_common
 import logging
+import Queue
 
 import config
 import db
-import psycopg2
 
 class NotaryHTTPServer(object):
 
@@ -90,14 +90,12 @@ class NotaryHTTPServer(object):
 				keys.append(k)
 			timestamps_by_key[k].append((row['start_ts'],row['end_ts']))
 		
-		if len(rows) == 0: 
-			# rate-limit on-demand probes
-			if self.active_threads < 10: 
+		if len(rows) == 0:
+			try:
+				on_demand_queue.put_nowait(service_id)
 				logger.debug("on demand probe for '%s'" % service_id)
-				t = OnDemandScanThread(service_id,10,self)
-				t.start()
-			else: 
-				logger.debug("Exceeded on demand threshold, not probing '%s'" % service_id)
+			except Queue.Full:
+				logger.debug("On-demand queue full, not probing '%s'" % service_id)
 			# return 404, assume client will re-query
 			raise cherrypy.HTTPError(404)
 	
@@ -177,29 +175,36 @@ class NotaryHTTPServer(object):
 	index.exposed = True
 
 
-class OnDemandScanThread(threading.Thread): 
+class OnDemandScanThread(threading.Thread):
+	"""On-demand scanner for unknown services."""
 
-	def __init__(self, sid,timeout_sec,server_obj):
-		self.sid = sid
-		self.server_obj = server_obj
+	def __init__(self, timeout_sec, source_queue, result_queue):
+		"""Initialize with source queue to read from and result queue
+		to put results in.
+		
+		@param timeout_sec: timeout for scan
+		@param source_queue: Queue.Queue object storing ObservedServer
+		objects
+		@param result_queue: Queue.Queue object where tuples of
+		(notary_common.ObservedServer, notary_common.Observation) will
+		be put as result of scan
+		"""
 		self.timeout_sec = timeout_sec
+		self.source_queue = source_queue
+		self.result_queue = result_queue
 		threading.Thread.__init__(self)
-		self.server_obj.inc_active_threads()
 
-	def run(self): 
-		try:
-			fp = attempt_observation_for_service(self.sid, self.timeout_sec)
-			notary_common.report_observation(self.sid, fp)
-		except psycopg2.DatabaseError:
-			logger.exception("Failed to store '%s'" % self.sid)
-		except Exception:
-			logger.info("Failed to scan %s" % self.sid)
-		finally:
-			#return connection back to pool, otherwise it won't know it's
-			#not used anymore
-			db.Db.putconn()
-
-		self.server_obj.dec_active_threads()
+	def run(self):
+		while True:
+			sid = self.source_queue.get()
+			
+			try: 
+				fp = attempt_observation_for_service(sid, self.timeout_sec)
+				self.result_queue.put((sid,fp))
+			except Exception, e:
+				logger.info("Failed to scan %s: %s" % (sid, e))
+				
+			self.source_queue.task_done()
 
 
 
@@ -220,6 +225,23 @@ ch.setLevel(config.Config.app_loglevel)
 formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s [%(pathname)s:%(lineno)d]")
 ch.setFormatter(formatter)
 logger.addHandler(ch)
+notary_common.set_logger(logger)
+
+#Queue for on-demand requests for new services
+on_demand_queue = Queue.Queue(maxsize=50)
+result_queue = Queue.Queue(maxsize=1000)
+
+#Storage thread for putting on-demand scan results into DB
+storage_thread = notary_common.StorageThread(result_queue)
+storage_thread.setDaemon(True)
+storage_thread.start()
+
+#On-demand scan worker threads
+for i in range(20):
+	t = OnDemandScanThread(10, on_demand_queue, result_queue)
+	t.setDaemon(True)
+	t.start()
+
 
 #Daemonizer(cherrypy.engine).subscribe()
 cherrypy.quickstart(NotaryHTTPServer(config.Config), "/", config.Config.cherrypy_config)

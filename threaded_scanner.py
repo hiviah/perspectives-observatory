@@ -32,16 +32,14 @@ import db
 # those that fail or hang after making some progress, as they could indicate
 # logic bugs
 
-#TODO sharing global_stats in threads has potential race condition; it also breaks
-#when hosts in input are not unique due to self.global_stats.threads[sid]
+#TODO sharing stats in threads has potential race condition, but currently
+#it only serves for informative count of scan failures
 
 class ScanThread(threading.Thread):
 	"""Worker thread scanning service taken from synchronized queue."""
 
-	def __init__(self, que, global_stats,timeout_sec): 
+	def __init__(self, que, timeout_sec): 
 		self.que = que
-		self.global_stats = global_stats
-		self.global_stats.active_threads += 1
 		threading.Thread.__init__(self)
 		self.timeout_sec = timeout_sec
 		self.timeout_exc = SSLScanTimeoutException() 
@@ -87,25 +85,6 @@ class ScanThread(threading.Thread):
 				
 			self.que.task_done()
 
-class StorageThread(threading.Thread):
-	"""Thread storing scanned observations into database."""
-	
-	def __init__(self, result_queue):
-		self.result_queue = result_queue
-		threading.Thread.__init__(self)
-	
-	def run(self):
-		while True:
-			scan_result = self.result_queue.get()
-			(sid, fp) = scan_result
-			try:
-				notary_common.report_observation(sid, fp)
-				logging.debug("Storing sid %s" % sid)
-			except Exception:
-				logging.exception("Failed to store result for sid %s" % sid)
-			
-			self.result_queue.task_done()
-		
 class GlobalStats(): 
 
 	def __init__(self): 
@@ -159,11 +138,11 @@ logging.info("Timeout = %s sec  Thread count = %s" % (timeout_sec, thread_count)
 que = Queue.Queue(maxsize=QUEUE_SIZE)
 
 for i in range(thread_count):
-	t = ScanThread(que, stats, timeout_sec)
+	t = ScanThread(que, timeout_sec)
 	t.setDaemon(True)
 	t.start()
 
-storage_thread = StorageThread(result_queue)
+storage_thread = notary_common.StorageThread(result_queue)
 storage_thread.setDaemon(True)
 storage_thread.start()
 
