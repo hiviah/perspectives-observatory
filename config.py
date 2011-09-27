@@ -49,6 +49,10 @@ class NotaryServerConfig(object):
 		
 		self.cherrypy_config = parser.get("server", "cherrypy_config")
 		
+		self.on_demand_scan_threads = parser.getint("server", "on_demand_scan_threads")
+		self.on_demand_scan_timeout = parser.getint("server", "on_demand_scan_timeout")
+		self.on_demand_storage_threads = parser.getint("server", "on_demand_storage_threads")
+		
 	
 	@staticmethod
 	def convertLoglevel(levelString):

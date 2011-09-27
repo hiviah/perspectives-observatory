@@ -34,15 +34,52 @@ def set_logger(logger_object):
 	global logger
 	logger = logger_object
 
+class ScannedSet(object):
+	"""Synchronized set keeping track of services being scanned. Its purpose
+	is to prevent dispatching unnecessary probes if service is already
+	in queue or being scanned (FF extension for some reason sends 3 requests
+	often faster than we get result).
+	"""
+	
+	def __init__(self):
+		self._lock = threading.Lock()
+		self._scanned_set = set()
+	
+	def insert(self, service_id):
+		"""Insert atomically service_id into set.
+		@param service_id: ObservedServer instance
+		@returns: True if the service was newly added or False if already
+		present
+		"""
+		with self._lock:
+			if service_id in self._scanned_set:
+				return False
+			self._scanned_set.add(service_id)
+			return True
+	
+	def remove(self, service_id):
+		"""Remove service_id from set.
+		@param service_id: ObservedServer instance
+		"""
+		with self._lock:
+			self._scanned_set.remove(service_id)
+		
+	
 class StorageThread(threading.Thread):
 	"""Thread storing scanned observations into database."""
 	
-	def __init__(self, result_queue):
+	def __init__(self, result_queue, scanned_set=None):
 		"""Initialize thread to store data from result queue.
+		
 		@param result_queue: a Queue.Queue instance, where each item
 		read is tuple (notary_common.ObservedServer, notary_common.Observation)
+		
+		@param scanned_set: must be None or ScannedSet instance. If not
+		None, upon successful storing of service_id into DB the service_id
+		is removed from the scanned_set
 		"""
 		self.result_queue = result_queue
+		self.scanned_set = scanned_set
 		threading.Thread.__init__(self)
 	
 	def run(self):
@@ -58,8 +95,10 @@ class StorageThread(threading.Thread):
 				logger.debug("Storing sid %s" % sid)
 			except Exception:
 				logger.exception("Failed to store result for sid %s" % sid)
-			
-			self.result_queue.task_done()
+			finally:
+				self.result_queue.task_done()
+				if self.scanned_set:
+					self.scanned_set.remove(sid)
 		
 class ObservedServer(object):
 	"""Represents scanned server - host, port, service"""

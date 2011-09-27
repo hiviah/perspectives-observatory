@@ -32,25 +32,59 @@ import Queue
 import config
 import db
 
+def create_logger(filename, loglevel):
+	"""Create custom logger to not interfere with cherrypy logging, because
+	it doesn't propagate to root logger.
+	"""
+	logger = logging.getLogger('notary_http')
+	logger.setLevel(loglevel)
+	logger.propagate = False
+	ch = logging.FileHandler(filename)
+	ch.setLevel(loglevel)
+	formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s [%(pathname)s:%(lineno)d]")
+	ch.setFormatter(formatter)
+	logger.addHandler(ch)
+	
+	return logger
+	
+def start_on_demand_threads(on_demand_queue, result_queue, scanned_set):
+	"""Start on-demand scan thread(s) and storage thread(s).
+	
+	@param on_demand_queue: Queue.Queue storing notary_common.ObservedServer
+	instances to scan.
+	@param result_queue: Queue.Queue storing scanned results as tuple
+	(notary_common.ObservedServer, notary_common.Observation)
+	@param scanned_set: notary_common.ScannedSet storing service_ids to be
+	scanned
+	"""
+	#Storage threads for putting on-demand scan results into DB
+	for i in range(config.Config.on_demand_storage_threads):
+		storage_thread = notary_common.StorageThread(result_queue, scanned_set)
+		storage_thread.setDaemon(True)
+		storage_thread.start()
+	
+	#On-demand scan worker threads
+	for i in range(config.Config.on_demand_scan_threads):
+		t = OnDemandScanThread(config.Config.on_demand_scan_timeout,
+					on_demand_queue, result_queue, scanned_set)
+		t.setDaemon(True)
+		t.start()
+
 class NotaryHTTPServer(object):
+	"""Class serving HTTP requests passed onto by CherryPy."""
 
-	def __init__(self, notary_config):
-		"""@param notary_config: config.NotaryServerConfig instance - parsed config"""
+	def __init__(self, notary_config, on_demand_queue, scanned_set):
+		"""
+		@param notary_config: config.NotaryServerConfig instance - parsed config
+		@param on_demand_queue: Queue.Queue where to put ObservedServer
+		instances to scan
+		@param scanned_set: notary_common.ScannedSet of instances waiting
+		to be scanned and stored
+		"""
 		self.config = notary_config
-		self.notary_priv_key = open(self.config.keyfile,'r').read() 
-		self.active_threads = 0
-		#lock for accessing self.active_threads 
-		self.thread_lock = threading.Lock()
-		
-	def inc_active_threads(self):
-		self.thread_lock.acquire()
-		self.active_threads += 1
-		self.thread_lock.release()
-
-	def dec_active_threads(self):
-		self.thread_lock.acquire()
-		self.active_threads -= 1
-		self.thread_lock.release()
+		self.notary_priv_key = open(self.config.keyfile,'r').read()
+		self.on_demand_queue = on_demand_queue
+		self.scanned_set = scanned_set
 
 	@staticmethod
 	def _unpack_hex_with_colons(b):
@@ -90,12 +124,20 @@ class NotaryHTTPServer(object):
 				keys.append(k)
 			timestamps_by_key[k].append((row['start_ts'],row['end_ts']))
 		
+		#If we have no record of the service_id, launch a on-demand
+		#scan, but only if the scan for the same service_id is not
+		#already scheduled or being scanned.
+		#Perspectives Firefox extensions likes to fire 3 requests
+		#often faster than we get the scan results, so this way we won't
+		#clog up the queue with unnecessary scans.
 		if len(rows) == 0:
 			try:
-				on_demand_queue.put_nowait(service_id)
-				logger.debug("on demand probe for '%s'" % service_id)
+				if self.scanned_set.insert(service_id):
+					self.on_demand_queue.put_nowait(service_id)
+					logger.debug("on demand probe for '%s'" % service_id)
 			except Queue.Full:
 				logger.debug("On-demand queue full, not probing '%s'" % service_id)
+				self.scanned_set.remove(service_id)
 			# return 404, assume client will re-query
 			raise cherrypy.HTTPError(404)
 	
@@ -178,7 +220,7 @@ class NotaryHTTPServer(object):
 class OnDemandScanThread(threading.Thread):
 	"""On-demand scanner for unknown services."""
 
-	def __init__(self, timeout_sec, source_queue, result_queue):
+	def __init__(self, timeout_sec, source_queue, result_queue, scanned_set):
 		"""Initialize with source queue to read from and result queue
 		to put results in.
 		
@@ -188,10 +230,13 @@ class OnDemandScanThread(threading.Thread):
 		@param result_queue: Queue.Queue object where tuples of
 		(notary_common.ObservedServer, notary_common.Observation) will
 		be put as result of scan
+		@param scanned_set: notary_common.ScannedSet storing service_ids
+		to be scanned
 		"""
 		self.timeout_sec = timeout_sec
 		self.source_queue = source_queue
 		self.result_queue = result_queue
+		self.scanned_set = scanned_set
 		threading.Thread.__init__(self)
 
 	def run(self):
@@ -203,46 +248,39 @@ class OnDemandScanThread(threading.Thread):
 				self.result_queue.put((sid,fp))
 			except Exception, e:
 				logger.info("Failed to scan %s: %s" % (sid, e))
+				self.scanned_set.remove(sid)
 				
 			self.source_queue.task_done()
 
 
 
+if __name__ == "__main__":
 
-if len(sys.argv) != 2:
-	print "usage: <notary-config-file>" 
-	exit(1) 
-
-config.config_initialize(sys.argv[1])
-db.db_initialize(config.Config)
-
-# create custom logger to not interfere with cherrypy logging
-logger = logging.getLogger('notary_http')
-logger.setLevel(config.Config.app_loglevel)
-logger.propagate = False
-ch = logging.FileHandler(config.Config.app_log)
-ch.setLevel(config.Config.app_loglevel)
-formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s [%(pathname)s:%(lineno)d]")
-ch.setFormatter(formatter)
-logger.addHandler(ch)
-notary_common.set_logger(logger)
-
-#Queue for on-demand requests for new services
-on_demand_queue = Queue.Queue(maxsize=50)
-result_queue = Queue.Queue(maxsize=1000)
-
-#Storage thread for putting on-demand scan results into DB
-storage_thread = notary_common.StorageThread(result_queue)
-storage_thread.setDaemon(True)
-storage_thread.start()
-
-#On-demand scan worker threads
-for i in range(20):
-	t = OnDemandScanThread(10, on_demand_queue, result_queue)
-	t.setDaemon(True)
-	t.start()
-
-
-#Daemonizer(cherrypy.engine).subscribe()
-cherrypy.quickstart(NotaryHTTPServer(config.Config), "/", config.Config.cherrypy_config)
-
+	if len(sys.argv) != 2:
+		print "usage: <notary-config-file>" 
+		exit(1) 
+	
+	config.config_initialize(sys.argv[1])
+	db.db_initialize(config.Config)
+	
+	logger = create_logger(config.Config.app_log, config.Config.app_loglevel)
+	notary_common.set_logger(logger)
+	
+	#Queue for on-demand requests for new services
+	on_demand_queue = Queue.Queue(maxsize=50)
+	result_queue = Queue.Queue(maxsize=1000)
+	#Synchronized set to prevent adding services that are being scanned/stored
+	scanned_set = notary_common.ScannedSet()
+	
+	start_on_demand_threads(on_demand_queue, result_queue, scanned_set)
+	
+	
+	#Daemonizer(cherrypy.engine).subscribe()
+	cherrypy.quickstart(
+		NotaryHTTPServer(config.Config, on_demand_queue, scanned_set),
+		"/", config.Config.cherrypy_config
+		)
+	
+	logger.info("Waiting for storage threads to finish...")
+	result_queue.join()
+	logger.info("Storage threads finished, closing down")

@@ -9,8 +9,8 @@ port = 5432
 user = perspectives
 password = db_password
 dbname = perspectives
-#note that cherrypy uses up to 10 threads by default and there can be up to 10
-#instances of OnDemandScanThread in notary_http.py
+#note that cherrypy uses up to 10 threads by default and there is one additional
+#storage thread (see on_demand_storage_threads below)
 min_connections = 1
 max_connections = 20
 
@@ -31,6 +31,12 @@ private = notary.priv
 # scanner_loglevel - loglevel for scanner
 #
 # cherrypy_config - config file for cherrypy (HTTP wrapper)
+#
+# on_demand_scan_threads - number of threads for scanning new services from
+#           notary HTTP server
+# on_demand_scan_timeout - timeout in seconds for on-demand SSL/TLS scanner
+# on_demand_storage_threads - number of threads storing scanned results from
+#           on-demand scans in notary HTTP server
 [server]
 use_sni = true
 app_log = app.log
@@ -38,4 +44,7 @@ app_loglevel = info
 scanner_log = scanner.log
 scanner_loglevel = info
 cherrypy_config = cherrypy.conf
+on_demand_scan_threads = 20
+on_demand_scan_timeout = 10
+on_demand_storage_threads = 1
 
