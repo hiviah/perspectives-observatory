@@ -101,7 +101,7 @@ class NotaryHTTPServer(object):
 		@param digest: digest to use ('md5', 'sha1', 'sha256'...)
 		@returns: base64-encoded signature of hashed data
 		"""
-		m = hashlib.md5()
+		m = hashlib.new(digest)
 		m.update(data)
 		bio = BIO.MemoryBuffer(self.notary_priv_key)
 		rsa_priv = RSA.load_key_bio(bio)
