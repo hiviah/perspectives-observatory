@@ -182,6 +182,16 @@ class Observation(object):
 	def __str__(self):
 		return "Observation: sha1: %s" % hashlib.sha1(self.ee_cert()).hexdigest()
 
+class EECert(object):
+	"""Represents observation of leaf certificate from DB view observations_view.
+	"""
+	
+	def __init__(self, id, cert, start_ts, end_ts):
+		self.id = id
+		self.cert = cert
+		self.start_ts = start_ts
+		self.end_ts = end_ts
+
 def store_service_id(service_id):
 	"""Stores service_d in 'services' table unless already present. Commits
 	transaction.
@@ -209,46 +219,17 @@ def store_service_id(service_id):
 	finally:
 		db.Db.commit()
 
-def get_most_recent_ee_cert(service_id):
-	"""Get most recent observation of EE certficate for service_id.
-	Commits transaction.
-	
-	@param service_id: instance of ObservedServer
-	@returns: tuple (id, certificate) if found as (int, str),
-	otherwise (None, None)
-	@raises psycopg2.DatabaseError on DB error
-	"""
-	cursor = db.Db.cursor()
-	
-	sql = """SELECT id, certificate from observations_view
-			WHERE host = %s	AND port = %s
-			ORDER BY end_ts DESC
-			LIMIT 1
-			"""
-	sql_data = (service_id.host, service_id.port)
-	
-	try:
-		cursor.execute(sql, sql_data)
-		row = cursor.fetchone()
-		
-		if row is not None:
-			return (row['id'], str(row['certificate']))
-		else:
-			return (None, None)
-	finally:
-		db.Db.commit()
-	
 def get_ee_certs(service_id):
 	"""Get all observations of EE certs for given service_id.
 	Commits transaction.
 	
 	@param service_id: instance of ObservedServer
-	@returns: list of tuples (int id, str certificate)
+	@returns: list of EECert instances
 	@raises psycopg2.DatabaseError on DB error
 	"""
 	cursor = db.Db.cursor()
 	
-	sql = """SELECT id, certificate from observations_view
+	sql = """SELECT id, certificate, start_ts, end_ts from observations_view
 			WHERE host = %s	AND port = %s
 			"""
 	sql_data = (service_id.host, service_id.port)
@@ -257,7 +238,8 @@ def get_ee_certs(service_id):
 		cursor.execute(sql, sql_data)
 		rows = cursor.fetchall()
 		
-		return [(row['id'], row['certificate']) for row in rows]
+		return [EECert(row['id'], str(row['certificate']), row['start_ts'], row['end_ts'])
+			for row in rows]
 	finally:
 		db.Db.commit()
 	

@@ -95,6 +95,34 @@ class NotaryHTTPServer(object):
 		colonized_hexstr = fmt % struct.unpack("%dB"%len(b), b)
 		return colonized_hexstr.lower()
 
+	def sign_rsa_base64(self, data, digest):
+		"""Sign hash of data with the server's private key.
+		@param data: binary data blob
+		@param digest: digest to use ('md5', 'sha1', 'sha256'...)
+		@returns: base64-encoded signature of hashed data
+		"""
+		m = hashlib.md5()
+		m.update(data)
+		bio = BIO.MemoryBuffer(self.notary_priv_key)
+		rsa_priv = RSA.load_key_bio(bio)
+		signature = rsa_priv.sign(m.digest(), digest)
+		base64_signature = base64.standard_b64encode(signature)
+		
+		return base64_signature
+		
+	def launch_on_demand_probe(self, service_id):
+		"""Launches on-demand probe for service_id if not already
+		scheduled.
+		@param service_id. notary_common.ObservedServer to scan
+		"""
+		try:
+			if self.scanned_set.insert(service_id):
+				self.on_demand_queue.put_nowait(service_id)
+				logger.debug("on demand probe for '%s'" % service_id)
+		except Queue.Full:
+			logger.debug("On-demand queue full, not probing '%s'" % service_id)
+			self.scanned_set.remove(service_id)
+			
 	def get_xml(self, service_id):
 		"""Return xml with certificates' fingerprints.
 		@param service_id: requested service
@@ -102,27 +130,19 @@ class NotaryHTTPServer(object):
 		"""
 		logger.info("Request for '%s'" % service_id)
 		
-		cur = db.Db.cursor()
-		sql = """SELECT certificate, start_ts, end_ts FROM observations_view
-			WHERE host = %s AND port = %s
-			"""
-		sql_data = (service_id.host, service_id.port)
-		cur.execute(sql, sql_data)
-		rows = cur.fetchall()
-		db.Db.commit()
+		ee_certs = notary_common.get_ee_certs(service_id)
 		
-		timestamps_by_key = {}
+		ee_certs_by_key = {}
 		keys = []
 
-		for row in rows:
-			cert = str(row['certificate'])
-			md5_fp = hashlib.md5(cert).digest()
+		for ee_cert in ee_certs:
+			md5_fp = hashlib.md5(ee_cert.cert).digest()
 			
 			k = md5_fp
-			if k not in timestamps_by_key:
-				timestamps_by_key[k] = []
+			if k not in ee_certs_by_key:
+				ee_certs_by_key[k] = []
 				keys.append(k)
-			timestamps_by_key[k].append((row['start_ts'],row['end_ts']))
+			ee_certs_by_key[k].append(ee_cert)
 		
 		#If we have no record of the service_id, launch a on-demand
 		#scan, but only if the scan for the same service_id is not
@@ -130,14 +150,8 @@ class NotaryHTTPServer(object):
 		#Perspectives Firefox extensions likes to fire 3 requests
 		#often faster than we get the scan results, so this way we won't
 		#clog up the queue with unnecessary scans.
-		if len(rows) == 0:
-			try:
-				if self.scanned_set.insert(service_id):
-					self.on_demand_queue.put_nowait(service_id)
-					logger.debug("on demand probe for '%s'" % service_id)
-			except Queue.Full:
-				logger.debug("On-demand queue full, not probing '%s'" % service_id)
-				self.scanned_set.remove(service_id)
+		if len(ee_certs) == 0:
+			self.launch_on_demand_probe(service_id)
 			# return 404, assume client will re-query
 			raise cherrypy.HTTPError(404)
 	
@@ -161,21 +175,20 @@ class NotaryHTTPServer(object):
 			key_elem = new_doc.createElement("key")
 			key_elem.setAttribute("type","ssl")
 			
-			#binary fingerprints are packed in alphabetical order (md5, sha1, ...)
 			fp_len = len(md5_fp)
 			fp_bytes = md5_fp
 			
 			key_elem.setAttribute("fp", self._unpack_hex_with_colons(md5_fp))
 			
 			top_element.appendChild(key_elem)
-			num_timespans = len(timestamps_by_key[k])
+			num_timespans = len(ee_certs_by_key[k])
 			
 			TYPE_SSL = 3 #from FF extension's comments
 			head = struct.pack("!2HB", num_timespans, fp_len, TYPE_SSL)
 			ts_bytes = ""
-			for ts in sorted(timestamps_by_key[k], key=lambda t_pair: t_pair[0]):
-				ts_start = ts[0]
-				ts_end	= ts[1]
+			for ee_cert in sorted(ee_certs_by_key[k], key=lambda ee_cert: ee_cert.start_ts):
+				ts_start = ee_cert.start_ts
+				ts_end	= ee_cert.end_ts
 				ts_elem = new_doc.createElement("timestamp")
 				ts_elem.setAttribute("end",str(ts_end))
 				ts_elem.setAttribute("start", str(ts_start))
@@ -186,16 +199,11 @@ class NotaryHTTPServer(object):
 	
 		packed_data = service_id.old_str() + struct.pack("B", 0) + packed_data 
 	
-		m = hashlib.md5()
-		m.update(packed_data)
-		bio = BIO.MemoryBuffer(self.notary_priv_key)
-		rsa_priv = RSA.load_key_bio(bio)
-		sig_before_raw = rsa_priv.sign(m.digest(),'md5') 
-		sig = base64.standard_b64encode(sig_before_raw) 
-	
+		sig = self.sign_rsa_base64(packed_data, digest="md5")
 		top_element.setAttribute("sig",sig)
 		return top_element.toprettyxml() 
 
+	@cherrypy.expose
 	def index(self, host=None, port=None, service_type=None):
 		"""
 		Return signed XML response for given host, port and service.
@@ -214,8 +222,56 @@ class NotaryHTTPServer(object):
 		
 		return self.get_xml(observed)
 
-	index.exposed = True
-
+	@cherrypy.expose
+	def get_certs(self, host=None, port=None, **kwargs):
+		"""Returns XML response containing certificate data and their
+		timestamps. Only leaf (EE) certificates are included, not the
+		whole chain.
+		
+		@param host: hostname
+		@param port: port where service runs
+		"""
+		if (host is None or port is None):
+			raise cherrypy.HTTPError(400)
+		host_port = str(host + ":" + port)
+		service_id = notary_common.ObservedServer(host_port)
+		ee_certs = notary_common.get_ee_certs(service_id)
+		
+		if len(ee_certs) == 0:
+			self.launch_on_demand_probe(service_id)
+			raise cherrypy.HTTPError(404)
+		
+		to_be_signed = host_port
+		#Data to be signed are simple concatenation of following:
+		# - service_id as string in the form 'host:port'
+		#Then, for each 'certificate' element, following attributes
+		#(ints are network order):
+		# - DER encoded cert body, uint32 start, uint32 end
+		
+		dom_impl = getDOMImplementation() 
+		new_doc = dom_impl.createDocument(None, "notary_reply", None) 
+		top_element = new_doc.documentElement
+		top_element.setAttribute("version", "1")
+		top_element.setAttribute("sig_type", "rsa-sha256")
+	
+		for ee_cert in ee_certs:
+			cert_elem = new_doc.createElement("certificate")
+			top_element.appendChild(cert_elem)
+			
+			cert_elem.setAttribute("body", base64.standard_b64encode(ee_cert.cert))
+			to_be_signed += ee_cert.cert
+			
+			cert_elem.setAttribute("start", str(ee_cert.start_ts))
+			cert_elem.setAttribute("end", str(ee_cert.end_ts))
+			to_be_signed += struct.pack("!2I", ee_cert.start_ts, ee_cert.end_ts)
+			
+		sig = self.sign_rsa_base64(to_be_signed, digest="sha256")
+		top_element.setAttribute("sig", sig)
+		
+		cherrypy.response.headers['Content-Type'] = 'text/xml'
+		
+		return new_doc.toprettyxml()
+	
 
 class OnDemandScanThread(threading.Thread):
 	"""On-demand scanner for unknown services."""
