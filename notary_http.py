@@ -240,6 +240,8 @@ class NotaryHTTPServer(object):
 			raise cherrypy.HTTPError(400)
 		host_port = str(host + ":" + port)
 		service_id = notary_common.ObservedServer(host_port)
+		logger.info("Certs request '%s'" % service_id)
+		
 		ee_certs = notary_common.get_ee_certs(service_id)
 		
 		if len(ee_certs) == 0:
