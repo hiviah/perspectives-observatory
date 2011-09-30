@@ -6,11 +6,13 @@ This is a fork of Perspectives notary server originally written by Dan Wendlandt
 
 Differences from the original Perspectives server:
 
-- stores whole certificates (DER encoded) instead of just md5 sum
+- stores whole certificates and CA chain (DER encoded) instead of just md5 sum
 - uses PostgreSQL instead of sqlite, so it's suitable for storing millions of records 
   (can function as SSL Observatory to make "global state snapshots" of SSLiverse subsets)
 - hard-coded defaults extracted from source and put into config file
 - other code cleanup (logging, threaded scanner rewrite, etc.)
+- two HTTP URLs exposed, one for fetching server certficates and the other to
+  force fresh scan even if service is known
 
 Author: Ondrej Mikle, ondrej.mikle @ {gmail.com, nic.cz}
 
@@ -33,7 +35,7 @@ yum install postgresql postgresql-server m2crypto python-psycopg2 python-cherryp
 
  ===== SETUP ====
 
-1. Quick database setup
+1. Basic database setup
 
 Here we assume the database runs on localhost (it should run either on localhost
 or LAN, psycopg does not support reconnects). Note that this setup may vary
@@ -132,18 +134,10 @@ in the database, the notary will automatically kick-off a probe for that service
 notary will respond with an HTTP 404, and the client should requery to get the results.
 The Perspectives Firefox client will requery appropriately.  
 
-Unlike the original C implementation of the notary server, this implementation performs
-signatures in the webserver portion of the code.  This makes scanning lighter weight, at the 
-cost of making requests heavy-weight and subject to DoS.  We could implement a caching scheme
-for the signatures if it proves valuable.  
+Two new method URLs exposed via HTTPwere added:
 
-The only service-type that is currently fully supported is SSL (service-type 2).  There is 
-still code for SSH (service-type 1) but since we no longer maintain any notary clients of
-this type, we do not regularly test it.  Currently, the threaded_scanner.py will only scan
-for SSL services, though work to have it scan for SSH services is pretty minor.  
-
-This code still needs some clean-up and less hard-coded configuration, but its good enough 
-for use.  Please visit the github page to submit changes and suggest improvements: 
-
-https://github.com/hiviah/Perspectives-Server-Postgresql
-
+- http://localhost:8080/get_certs?host=encrypted.google.com&port=443
+  - fetches XML with full leaf certificate data of server (see utilities/cert_client.py)
+- http://localhost:8080/refresh_scan?host=encrypted.google.com&port=443
+  - forces fresh scan of encrypted.google.com unless last scan is less than 10
+    minutes old
