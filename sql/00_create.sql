@@ -49,7 +49,9 @@ CREATE VIEW observations_view AS
     SELECT ee.id AS id, 
         s.host AS host, 
         s.port AS port, 
+        ee.start_time,
         date_part('epoch', ee.start_time)::int AS start_ts,
+        ee.end_time,
         date_part('epoch', ee.end_time)::int AS end_ts,
         ee.certificate AS certificate
     FROM services AS s INNER JOIN ee_certs AS ee ON (ee.service_id = s.id);
