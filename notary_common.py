@@ -104,7 +104,7 @@ class ObservedServer(object):
 	"""Represents scanned server - host, port, service"""
 
 	#syntax for "host:port"
-	_syntax_re = re.compile("([^,:]+):(\d+)")
+	_syntax_re = re.compile("^([^,:]+):(\d+)$")
 	
 	def __init__(self, service_id):
 		"""Parse service_id string of form "host:port,service"

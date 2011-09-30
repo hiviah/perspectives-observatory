@@ -217,14 +217,15 @@ class NotaryHTTPServer(object):
 		@param port: port where service runs
 		@param service_type: 1 (ssh) or 2 (ssl), although type 1 is obsolete
 		"""
-		if (host == None or port == None or service_type == None): 
+		#we server only SSL, SSH is obsolete
+		if (host == None or port == None or service_type != "2"): 
 			raise cherrypy.HTTPError(400)
-		if service_type != "2":
-			#we server only SSL, SSH is obsolete
-			raise cherrypy.HTTPError(404)
-		cherrypy.response.headers['Content-Type'] = 'text/xml'
-		observed = notary_common.ObservedServer(str(host + ":" + port))
+		try:
+			observed = notary_common.ObservedServer(str(host + ":" + port))
+		except ValueError:
+			raise cherrypy.HTTPError(400)
 		
+		cherrypy.response.headers['Content-Type'] = 'text/xml'
 		return self.get_xml(observed)
 
 	@cherrypy.expose
@@ -238,10 +239,13 @@ class NotaryHTTPServer(object):
 		"""
 		if (host is None or port is None):
 			raise cherrypy.HTTPError(400)
-		host_port = str(host + ":" + port)
-		service_id = notary_common.ObservedServer(host_port)
-		logger.info("Certs request '%s'" % service_id)
+		try:
+			host_port = str(host + ":" + port)
+			service_id = notary_common.ObservedServer(host_port)
+		except ValueError:
+			raise cherrypy.HTTPError(400)
 		
+		logger.info("Certs request '%s'" % service_id)
 		ee_certs = notary_common.get_ee_certs(service_id)
 		
 		if len(ee_certs) == 0:
@@ -295,7 +299,11 @@ class NotaryHTTPServer(object):
 		if (host is None or port is None):
 			raise cherrypy.HTTPError(400)
 		
-		service_id = notary_common.ObservedServer(str(host + ":" + port))
+		try:
+			service_id = notary_common.ObservedServer(str(host + ":" + port))
+		except ValueError:
+			raise cherrypy.HTTPError(400)
+			
 		logger.info("Refresh for '%s'" % service_id)
 		
 		cursor = db.Db.cursor()
