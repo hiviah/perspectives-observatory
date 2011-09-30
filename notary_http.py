@@ -113,15 +113,20 @@ class NotaryHTTPServer(object):
 	def launch_on_demand_probe(self, service_id):
 		"""Launches on-demand probe for service_id if not already
 		scheduled.
+		
 		@param service_id. notary_common.ObservedServer to scan
+		@returns: True if scan was launched or already scheduled,
+			False if queue is full
 		"""
 		try:
 			if self.scanned_set.insert(service_id):
 				self.on_demand_queue.put_nowait(service_id)
 				logger.debug("on demand probe for '%s'" % service_id)
+			return True
 		except Queue.Full:
 			logger.debug("On-demand queue full, not probing '%s'" % service_id)
 			self.scanned_set.remove(service_id)
+			return False
 			
 	def get_xml(self, service_id):
 		"""Return xml with certificates' fingerprints.
@@ -271,6 +276,49 @@ class NotaryHTTPServer(object):
 		cherrypy.response.headers['Content-Type'] = 'text/xml'
 		
 		return new_doc.toprettyxml()
+	
+	@cherrypy.expose
+	def refresh_scan(self, host=None, port=None, **kwargs):
+		"""Force fresh scan of service. If service has been recently
+		scanned, nothing is done. "Recently" currently means 10 minutes.
+		
+		@param host: host to scan
+		@param port: port to scan
+		
+		HTTP return code:
+			202 - scan scheduled
+			200 - not scanning, recent enough result exists
+			404 - scan not scheduled (likely due to queue full)
+		"""
+		if (host is None or port is None):
+			raise cherrypy.HTTPError(400)
+		
+		service_id = notary_common.ObservedServer(str(host + ":" + port))
+		logger.info("Refresh for '%s'" % service_id)
+		
+		cursor = db.Db.cursor()
+		sql = """SELECT 1 FROM observations_view
+				WHERE host = %s AND port = %s
+				AND end_time > NOW() - INTERVAL '10 minutes'
+				LIMIT 1
+			"""
+		sql_data = (service_id.host, service_id.port)
+		
+		try:
+			cursor.execute(sql, sql_data)
+			row = cursor.fetchone()
+			
+			if not row: #no recent scan
+				scanned = self.launch_on_demand_probe(service_id)
+				if not scanned:
+					raise cherrypy.HTTPError(404)
+				cherrypy.response.status = 202
+				
+			#if recent row exists, default HTTP 200 is returned
+		finally:
+			db.Db.commit()
+		
+		return
 	
 
 class OnDemandScanThread(threading.Thread):
