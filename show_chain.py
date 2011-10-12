@@ -23,6 +23,7 @@ import time
 from datetime import datetime
 import shlex
 import subprocess
+import hashlib
 
 import db
 import config
@@ -55,6 +56,7 @@ for cert in [ee_cert] + ca_certs:
 	p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
 	(cout, cerr) = p.communicate(cert)
 	print cout
+	print "** SHA1:", hashlib.sha1(cert).hexdigest(), "MD5:", hashlib.md5(cert).hexdigest()
 	print "-"*20
 	p.wait()
 
