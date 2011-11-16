@@ -51,7 +51,8 @@ if not row:
 ee_cert = str(row['certificate'])
 ca_certs = notary_common.get_ca_chain(ee_cert_id)
 
-cmd = shlex.split("openssl x509 -inform der -noout -text")
+#cmd = shlex.split("openssl x509 -inform der -noout -text")
+cmd = shlex.split("openssl x509 -inform der -text")
 for cert in [ee_cert] + ca_certs:
 	p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
 	(cout, cerr) = p.communicate(cert)
