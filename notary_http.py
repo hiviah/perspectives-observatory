@@ -16,7 +16,7 @@
 #   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import cherrypy
-from cherrypy.process.plugins import Daemonizer
+from cherrypy.process.plugins import Daemonizer, SimplePlugin
 from xml.dom.minidom import getDOMImplementation
 import struct
 import base64
@@ -31,6 +31,22 @@ import Queue
 
 import config
 import db
+
+class ScanThreadPlugin(SimplePlugin):
+	"""Starts scanning threads. This is implemented as cherrypy plugin so
+	that threads are started after daemonizer.
+	"""
+
+	def __init__(self, engine, on_demand_queue, result_queue, scanned_set): 
+		SimplePlugin.__init__(self, engine)
+		self.on_demand_queue = on_demand_queue
+		self.result_queue = result_queue
+		self.scanned_set = scanned_set
+
+	def start(self):
+		start_on_demand_threads(self.on_demand_queue, self.result_queue, self.scanned_set)
+	#priority must be > 65 (after daemonizer) and < 75 (before HTTP server)
+	start.priority = 70
 
 def create_logger(filename, loglevel):
 	"""Create custom logger to not interfere with cherrypy logging, because
@@ -386,10 +402,10 @@ if __name__ == "__main__":
 	#Synchronized set to prevent adding services that are being scanned/stored
 	scanned_set = notary_common.ScannedSet()
 	
-	start_on_demand_threads(on_demand_queue, result_queue, scanned_set)
+	Daemonizer(cherrypy.engine).subscribe()
+	ScanThreadPlugin(cherrypy.engine, on_demand_queue, result_queue, scanned_set).subscribe()
 	
 	
-	#Daemonizer(cherrypy.engine).subscribe()
 	cherrypy.quickstart(
 		NotaryHTTPServer(config.Config, on_demand_queue, scanned_set),
 		"/", config.Config.cherrypy_config
