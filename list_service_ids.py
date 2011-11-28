@@ -15,10 +15,8 @@
 #   You should have received a copy of the GNU General Public License
 #   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import sys
-import os
-import re
 from datetime import datetime, timedelta
+from optparse import OptionParser
 
 import config
 import db
@@ -35,22 +33,33 @@ import db
 # Thus, the script can be used to either generate a list of all services
 # considered 'live' and of all services considered 'dead'.
 
-def usage_and_exit(): 
-	print >> sys.stderr, "ERROR: usage: <notary.config> <all|older|newer> <days>"
-	exit(1)
 
-if len(sys.argv) == 4: 
-	if not (sys.argv[2] == "older" or sys.argv[2] == "newer"): 
-		usage_and_exit()
-	threshold_time = datetime.now() - timedelta(days=int(sys.argv[3]))
-elif len(sys.argv) == 3: 
-	if not sys.argv[2] == "all": 
-		usage_and_exit()
-else: 
-	usage_and_exit()
+parser = OptionParser("Usage: list_service_ids.py [options] notary.config")
+parser.add_option("-b", "--blacklist",
+	action="store", dest="blacklist",
+	help="file with hostnames to skip, one per line")
+parser.add_option("-o", "--older",
+	action="store", dest="older", metavar="N", type="int",
+	help="hosts whose observations are older than N days")
+parser.add_option("-n", "--newer",
+	action="store", dest="newer", metavar="N", type="int",
+	help="hosts whose observations are newer than N days")
+
+(options, args) = parser.parse_args()
+
+if len(args) < 1:
+	parser.error("Missing configuration file argument")
+
+if options.newer is not None and options.older is not None:
+	parser.error("Only one of --newer/--older can be used")
+
+if options.newer is not None:
+	threshold_time = datetime.now() - timedelta(days=int(options.newer))
+if options.older is not None:
+	threshold_time = datetime.now() - timedelta(days=int(options.older))
 	
 
-config.config_initialize(sys.argv[1])
+config.config_initialize(args[0])
 db.db_initialize(config.Config)
 
 #Use named (server-side) cursor to avoid too much memory consumed by normal
@@ -58,12 +67,18 @@ db.db_initialize(config.Config)
 #fetchone() is called (psycopg behaves this way).
 cursor = db.Db.cursor(name="list_services")
 
+blacklist = set()
+blacklist_fname = options.blacklist
+if blacklist_fname:
+	with file(blacklist_fname) as blacklist_file:
+		blacklist = set([line.rstrip() for line in blacklist_file])
+
 
 try:
-	if sys.argv[2] == "all": 
+	if options.newer is None and options.older is None: 
 		sql = "SELECT host, port FROM services"
 		cursor.execute(sql)
-	elif sys.argv[2] == "older": 
+	elif options.older is not None:
 		sql = """SELECT host, port FROM services
 				WHERE NOT EXISTS
 					(SELECT 1 FROM ee_certs WHERE
@@ -71,7 +86,7 @@ try:
 						AND end_time > %s)
 			"""
 		cursor.execute(sql, (threshold_time,))
-	else: 
+	else: #options.newer is not None
 		sql = """SELECT host, port FROM services
 				WHERE EXISTS
 					(SELECT 1 FROM ee_certs WHERE
@@ -85,7 +100,8 @@ try:
 		if not rows:
 			break
 		for row in rows:
-			print "%s:%s" % (row['host'] , row['port'])
+			if row['host'] not in blacklist:
+				print "%s:%s" % (row['host'] , row['port'])
 finally:
 	cursor.close()
 	db.Db.commit()
