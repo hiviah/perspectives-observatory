@@ -138,6 +138,14 @@ Two new method URLs exposed via HTTPwere added:
 
 - http://localhost:8080/get_certs?host=encrypted.google.com&port=443
   - fetches XML with full leaf certificate data of server (see utilities/cert_client.py)
+  - return codes:
+    HTTP 200 - we have data
+    HTTP 404 - no data, but launching scan in background, try some seconds later
 - http://localhost:8080/refresh_scan?host=encrypted.google.com&port=443
   - forces fresh scan of encrypted.google.com unless last scan is less than 10
     minutes old
+    - return codes:
+      HTTP 202 - scan scheduled for immediate dispatch
+      HTTP 200 - not scanning, scanned in recent few minutes
+      HTTP 404 - scan not scheduled (queue may be full)
+
